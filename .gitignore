@@ -1,0 +1,59 @@
+# Node / frontend
+node_modules/
+dist/
+build/
+.vite/
+.eslintcache
+.parcel-cache/
+.cache/
+.turbo/
+.next/
+out/
+coverage/
+
+# Python / backend
+__pycache__/
+*.py[cod]
+*.pyd
+.venv/
+venv/
+ENV/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Env files (keep examples)
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# IDE / editor
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local history / temp
+.history/

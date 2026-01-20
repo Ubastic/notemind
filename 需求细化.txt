@@ -1,0 +1,543 @@
+完美！方案确定，我现在给你完整的产品设计文档和技术实现方案。
+
+---
+
+# 📋 产品设计方案 - AI智能笔记本
+
+## 一、产品概述
+
+**产品名称**：NoteMind（笔记大脑）
+
+**核心价值**：
+- 记录混乱，检索智能
+- 零思考记录，AI自动整理
+- 第二大脑，永不遗忘
+
+**目标用户**：思维跳跃、记录碎片化、需要快速存取信息的个人用户
+
+---
+
+## 二、功能架构
+
+```
+NoteMind
+├── 核心功能
+│   ├── 快速记录（AI自动分类/打标签/提取实体）
+│   ├── 智能搜索（语义搜索+关键词+时间筛选）
+│   ├── 多视图浏览（时间轴/分类/随机）
+│   └── 敏感信息保护（自动加密+匿名化）
+│
+├── 辅助功能
+│   ├── 分享链接（单条/批量，支持有效期）
+│   ├── AI问答（直接问"XX密码是多少"）
+│   ├── 定期总结（周报自动生成）
+│   └── 数据导出（Markdown/JSON）
+│
+└── 基础功能
+    ├── 用户认证（简单密码+JWT持久化）
+    ├── 快捷键支持（Ctrl+K记录，Ctrl+F搜索）
+    └── 响应式设计（支持手机/平板/桌面）
+```
+
+---
+
+## 三、详细功能设计
+
+### 3.1 快速记录流程
+
+```
+用户输入
+    ↓
+前端敏感信息检测（正则匹配密码、token、IP等）
+    ↓
+生成匿名化映射表 {ekjsdf: "Abc123456", xkdj92: "ghp_xxxx"}
+    ↓
+替换后的文本 → 调用阿里云大模型API
+    ↓
+AI返回：{
+  category: "凭证",
+  tags: ["阿里云", "服务器"],
+  summary: "阿里云主机登录信息",
+  entities: {ip: "47.93.xx.xx", username: "root"},
+  sensitivity: "high"
+}
+    ↓
+前端还原敏感信息 ekjsdf → Abc123456
+    ↓
+加密敏感字段（AES-256，密钥从用户密码派生）
+    ↓
+存入SQLite（原文加密，AI元数据不加密）
+    ↓
+显示：✅ 已安全保存到【凭证库】
+```
+
+**敏感信息检测规则**（前端正则）：
+```javascript
+const SENSITIVE_PATTERNS = {
+  password: /password|passwd|pwd|密码[:：=]\s*\S+/i,
+  token: /token|key|secret[:：=]\s*[\w-]+/i,
+  ip: /\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/,
+  email: /[\w.-]+@[\w.-]+\.\w+/,
+  phone: /1[3-9]\d{9}/
+}
+```
+
+---
+
+### 3.2 智能搜索实现
+
+**搜索优先级**：
+1. **精确匹配**（关键词直接命中）
+2. **语义搜索**（使用Embedding向量相似度）
+3. **实体匹配**（搜索提取的entities字段）
+4. **时间筛选**（AI理解"上周""去年"等）
+
+**搜索示例**：
+```
+用户输入："上个月那个机器学习项目的服务器"
+
+AI解析：
+- 时间：上个月 → created_at BETWEEN '2024-12-01' AND '2024-12-31'
+- 实体：机器学习项目 → tags LIKE '%机器学习%'
+- 类型：服务器 → category='凭证' OR content LIKE '%服务器%'
+
+SQL查询：
+SELECT * FROM notes 
+WHERE created_at BETWEEN '2024-12-01' AND '2024-12-31'
+  AND (tags LIKE '%机器学习%' OR content LIKE '%机器学习%')
+  AND (category='凭证' OR content LIKE '%服务器%')
+ORDER BY similarity(embedding, query_embedding) DESC
+LIMIT 10
+```
+
+---
+
+### 3.3 界面设计（极简黑白）
+
+**配色方案**：
+```
+主色：#000000（纯黑）
+背景：#FFFFFF（纯白）
+边框：#E5E5E5（浅灰）
+次要文字：#666666（中灰）
+强调色：#000000（加粗/下划线）
+```
+
+**主界面线框图**：
+```
+┌────────────────────────────────────────────┐
+│  NoteMind                    [@用户名 ⚙️]  │
+├────────────────────────────────────────────┤
+│                                            │
+│  ┌────────────────────────────────────┐   │
+│  │  💭 想到什么就写下来...            │   │
+│  │  (Ctrl+K 快速记录)                 │   │
+│  │                                    │   │
+│  └────────────────────────────────────┘   │
+│                                            │
+│  ────────────────────────────────────────  │
+│                                            │
+│  [时间轴] [分类] [随机]         🔍 搜索    │
+│                                            │
+│  今天 ─────────────────────────────────    │
+│  │                                         │
+│  ├─ 15:30                                  │
+│  │  💡 想做一个自动化爬虫...               │
+│  │  #Python #爬虫 #想法                   │
+│  │  [查看详情] [分享] [删除]               │
+│  │                                         │
+│  ├─ 10:22                                  │
+│  │  🔐 阿里云主机更新密码                  │
+│  │  #阿里云 #服务器 #凭证                 │
+│  │  [查看详情] [分享] [删除]               │
+│                                            │
+│  昨天 ─────────────────────────────────    │
+│  │  ...                                    │
+│                                            │
+└────────────────────────────────────────────┘
+```
+
+**详情卡片**：
+```
+┌────────────────────────────────┐
+│  🔐 阿里云主机登录信息          │
+│  ────────────────────────────  │
+│                                │
+│  IP: 47.93.xx.xx               │
+│  用户: root                     │
+│  密码: ******** [👁️ 显示]      │
+│                                │
+│  创建时间: 2025-01-18 10:22    │
+│  分类: 凭证                     │
+│  标签: #阿里云 #服务器          │
+│                                │
+│  [🔗 分享链接] [📝 编辑] [🗑️ 删除] │
+└────────────────────────────────┘
+```
+
+---
+
+### 3.4 数据库设计（最终版）
+
+```sql
+-- 用户表
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,  -- bcrypt hash
+    salt TEXT NOT NULL,            -- 用于派生加密密钥
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 笔记表
+CREATE TABLE notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    
+    -- 原始内容（敏感信息已加密）
+    content TEXT NOT NULL,
+    content_encrypted BOOLEAN DEFAULT 0,
+    
+    -- AI生成的元数据（不加密，用于搜索）
+    ai_category TEXT,              -- 凭证/工作/灵感/待办
+    ai_summary TEXT,               -- 摘要
+    ai_tags TEXT,                  -- JSON数组: ["阿里云", "服务器"]
+    ai_entities TEXT,              -- JSON对象: {ip: "...", username: "..."}
+    ai_sensitivity TEXT,           -- low/medium/high
+    
+    -- 向量搜索（存储embedding的JSON）
+    embedding TEXT,
+    
+    -- 元信息
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX idx_notes_user_id ON notes(user_id);
+CREATE INDEX idx_notes_created_at ON notes(created_at);
+CREATE INDEX idx_notes_category ON notes(ai_category);
+
+-- 分享表
+CREATE TABLE shares (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    note_id INTEGER NOT NULL,
+    share_token TEXT UNIQUE NOT NULL,  -- 随机生成
+    expires_at TIMESTAMP,
+    view_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_shares_token ON shares(share_token);
+```
+
+---
+
+### 3.5 加密方案
+
+**密钥派生**（PBKDF2）：
+```python
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+
+def derive_key(password: str, salt: bytes) -> bytes:
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100000,
+    )
+    return kdf.derive(password.encode())
+```
+
+**加密/解密**（AES-256-GCM）：
+```python
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+def encrypt_content(plaintext: str, key: bytes) -> str:
+    aesgcm = AESGCM(key)
+    nonce = os.urandom(12)
+    ciphertext = aesgcm.encrypt(nonce, plaintext.encode(), None)
+    # 返回 base64(nonce + ciphertext)
+    return base64.b64encode(nonce + ciphertext).decode()
+
+def decrypt_content(encrypted: str, key: bytes) -> str:
+    data = base64.b64decode(encrypted)
+    nonce, ciphertext = data[:12], data[12:]
+    aesgcm = AESGCM(key)
+    plaintext = aesgcm.decrypt(nonce, ciphertext, None)
+    return plaintext.decode()
+```
+
+**匿名化流程**：
+```python
+import re
+import secrets
+
+def anonymize_sensitive_data(text: str) -> tuple[str, dict]:
+    """返回 (匿名化文本, 映射表)"""
+    mapping = {}
+    
+    def replace_match(match):
+        original = match.group(0)
+        placeholder = f"ANON_{secrets.token_hex(4)}"
+        mapping[placeholder] = original
+        return placeholder
+    
+    # 匿名化密码、token等
+    anonymized = re.sub(
+        r'(password|token|key|密码)[:：=]\s*(\S+)',
+        replace_match,
+        text,
+        flags=re.IGNORECASE
+    )
+    
+    return anonymized, mapping
+
+def restore_sensitive_data(text: str, mapping: dict) -> str:
+    """还原匿名化数据"""
+    for placeholder, original in mapping.items():
+        text = text.replace(placeholder, original)
+    return text
+```
+
+---
+
+### 3.6 AI集成（阿里云通义千问）
+
+**API调用示例**：
+```python
+import dashscope
+from http import HTTPStatus
+
+def analyze_note(content: str) -> dict:
+    """
+    调用阿里云大模型分析笔记
+    返回: {category, tags, summary, entities, sensitivity}
+    """
+    
+    prompt = f"""
+请分析以下笔记内容，返回JSON格式：
+
+笔记内容：
+{content}
+
+要求：
+1. category: 分类为 "凭证"/"工作"/"灵感"/"待办" 之一
+2. tags: 提取3-5个关键标签（数组）
+3. summary: 一句话摘要（20字内）
+4. entities: 提取的实体，如 {{"ip": "...", "project": "..."}}
+5. sensitivity: 敏感度 "low"/"medium"/"high"
+
+只返回JSON，不要其他内容。
+"""
+    
+    response = dashscope.Generation.call(
+        model='qwen-plus',  # 或 qwen-turbo
+        prompt=prompt,
+        result_format='message',
+    )
+    
+    if response.status_code == HTTPStatus.OK:
+        result = response.output.choices[0].message.content
+        return json.loads(result)
+    else:
+        raise Exception(f"AI调用失败: {response.message}")
+```
+
+**语义搜索（使用Embedding）**：
+```python
+def get_embedding(text: str) -> list[float]:
+    """获取文本向量"""
+    response = dashscope.TextEmbedding.call(
+        model=dashscope.TextEmbedding.Models.text_embedding_v1,
+        input=text
+    )
+    return response.output.embeddings[0].embedding
+
+def semantic_search(query: str, notes: list) -> list:
+    """语义搜索"""
+    query_emb = get_embedding(query)
+    
+    # 计算余弦相似度
+    results = []
+    for note in notes:
+        note_emb = json.loads(note.embedding)
+        similarity = cosine_similarity(query_emb, note_emb)
+        results.append((note, similarity))
+    
+    # 按相似度排序
+    results.sort(key=lambda x: x[1], reverse=True)
+    return [note for note, _ in results[:10]]
+```
+
+---
+
+## 四、技术栈明细
+
+### 后端
+```
+FastAPI==0.104.1
+SQLAlchemy==2.0.23
+pydantic==2.5.0
+python-jose[cryptography]==3.3.0  # JWT
+passlib[bcrypt]==1.7.4             # 密码hash
+dashscope==1.14.0                  # 阿里云AI
+cryptography==41.0.7               # AES加密
+sqlite3                            # 内置
+```
+
+### 前端
+```
+React 18
+Vite（构建工具）
+Tailwind CSS（黑白极简风格）
+axios（HTTP请求）
+react-router-dom（路由）
+```
+
+### 部署
+```
+Ubuntu Server
+Nginx（反向代理）
+PM2（进程管理）
+```
+
+---
+
+## 五、API设计
+
+### 认证相关
+```
+POST   /api/auth/register      # 注册
+POST   /api/auth/login         # 登录（返回JWT token）
+POST   /api/auth/logout        # 登出
+GET    /api/auth/me            # 获取当前用户信息
+```
+
+### 笔记相关
+```
+POST   /api/notes              # 创建笔记（AI自动处理）
+GET    /api/notes              # 获取笔记列表（支持分页/筛选）
+GET    /api/notes/{id}         # 获取单条笔记详情
+PUT    /api/notes/{id}         # 更新笔记
+DELETE /api/notes/{id}         # 删除笔记
+POST   /api/notes/search       # 智能搜索
+GET    /api/notes/random       # 随机获取笔记（灵感激发）
+```
+
+### 分享相关
+```
+POST   /api/shares             # 创建分享链接
+GET    /api/shares/{token}     # 访问分享内容（无需登录）
+DELETE /api/shares/{id}        # 删除分享
+```
+
+### AI相关
+```
+POST   /api/ai/ask             # AI问答模式
+POST   /api/ai/summarize       # 生成周报总结
+```
+
+---
+
+## 六、前端页面结构
+
+```
+/                    # 主页（时间轴视图）
+/login               # 登录页
+/register            # 注册页
+/category/:type      # 分类视图（凭证/工作/灵感/待办）
+/search?q=xxx        # 搜索结果页
+/note/:id            # 笔记详情页
+/random              # 随机浏览页
+/settings            # 设置页（修改密码、导出数据）
+/share/:token        # 分享页（公开访问）
+```
+
+---
+
+## 七、开发优先级
+
+**Phase 1（MVP）**：
+1. ✅ 用户认证（注册/登录/JWT）
+2. ✅ 基础笔记CRUD
+3. ✅ AI自动分类和打标签
+4. ✅ 敏感信息加密
+5. ✅ 时间轴视图
+
+**Phase 2（增强）**：
+6. ✅ 智能搜索（关键词+语义）
+7. ✅ 分类视图
+8. ✅ 分享功能
+9. ✅ 随机浏览
+
+**Phase 3（优化）**：
+10. ✅ AI问答模式
+11. ✅ 周报自动总结
+12. ✅ 数据导出
+13. ✅ 快捷键支持
+
+---
+
+## 八、安全考虑
+
+1. **密码安全**：bcrypt hash + salt
+2. **数据加密**：敏感内容AES-256-GCM加密
+3. **传输安全**：强制HTTPS（Nginx配置）
+4. **API安全**：JWT token验证，7天过期
+5. **SQL注入**：使用ORM参数化查询
+6. **XSS防护**：前端输出转义
+7. **CSRF防护**：SameSite Cookie
+8. **API密钥**：存环境变量，不提交代码
+
+---
+
+## 九、部署方案
+
+```bash
+# 服务器目录结构
+/opt/notemind/
+├── backend/          # FastAPI后端
+│   ├── main.py
+│   ├── requirements.txt
+│   └── notemind.db   # SQLite数据库
+├── frontend/         # React前端构建产物
+│   └── dist/
+└── nginx.conf        # Nginx配置
+```
+
+**Nginx配置示例**：
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+    
+    # 前端静态文件
+    location / {
+        root /opt/notemind/frontend/dist;
+        try_files $uri $uri/ /index.html;
+    }
+    
+    # API代理
+    location /api {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+**PM2启动脚本**：
+```bash
+pm2 start "uvicorn main:app --host 127.0.0.1 --port 8000" --name notemind
+pm2 save
+pm2 startup
+```
+
+---
+
+现在我给你生成完整的代码框架！准备好了吗？

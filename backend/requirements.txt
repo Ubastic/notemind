@@ -1,0 +1,12 @@
+fastapi==0.95.2
+uvicorn[standard]==0.22.0
+websockets==10.4
+SQLAlchemy==1.4.49
+pydantic==1.10.12
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==3.2.2
+cryptography==39.0.2
+requests==2.31.0
+dashscope==1.16.0
+pytz==2023.3
