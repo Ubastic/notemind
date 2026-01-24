@@ -1,12 +1,50 @@
 # -*- mode: python ; coding: utf-8 -*-
 import sys
 import os
-from PyInstaller.utils.hooks import copy_metadata
+from PyInstaller.utils.hooks import copy_metadata, collect_submodules
 
 block_cipher = None
 
 # Ensure we can find the app module
 sys.path.insert(0, os.path.abspath("."))
+
+# Collect all submodules for complex packages to avoid missing hidden imports
+hidden_imports = []
+hidden_imports += collect_submodules('fastapi')
+hidden_imports += collect_submodules('starlette')
+hidden_imports += collect_submodules('uvicorn')
+hidden_imports += collect_submodules('pydantic')
+hidden_imports += collect_submodules('sqlalchemy')
+hidden_imports += collect_submodules('cryptography')
+hidden_imports += collect_submodules('jose')
+hidden_imports += collect_submodules('passlib')
+hidden_imports += collect_submodules('multipart')
+hidden_imports += collect_submodules('anyio')
+
+# Add specific individual modules that might be missed
+hidden_imports += [
+    'uvloop',
+    'httptools',
+    'watchfiles',
+    'email',
+    'email.message',
+    'email.mime',
+    'python_multipart',
+    'bcrypt',
+    'pytz',
+    'aiofiles',
+    'dashscope',
+    'requests',
+    'idna',
+    'certifi',
+    'charset_normalizer',
+    'urllib3',
+    'sqlite3',
+    'distutils',
+    'python-dotenv',
+    'importlib_metadata',
+    'typing_extensions',
+]
 
 a = Analysis(
     ['run.py'],
@@ -17,42 +55,7 @@ a = Analysis(
         ('../frontend/dist', 'frontend/dist'),  # Embed frontend if built
         ('.env.example', '.'),
     ] + copy_metadata('sqlalchemy') + copy_metadata('requests'),
-    hiddenimports=[
-        'uvicorn.logging',
-        'uvicorn.loops',
-        'uvicorn.loops.auto',
-        'uvicorn.protocols',
-        'uvicorn.protocols.http',
-        'uvicorn.protocols.http.auto',
-        'uvicorn.protocols.websockets',
-        'uvicorn.protocols.websockets.auto',
-        'uvicorn.lifespan',
-        'uvicorn.lifespan.on',
-        'uvicorn.importer',
-        'fastapi',
-        'starlette',
-        'pydantic',
-        'email',
-        'email.message',
-        'email.mime',
-        'multipart',
-        'python_multipart',
-        'sqlalchemy.ext.declarative',
-        'sqlalchemy.orm',
-        'sqlalchemy.sql.default_comparator',
-        'jose',
-        'passlib',
-        'passlib.handlers.bcrypt',
-        'bcrypt',
-        'pytz',
-        'aiofiles',
-        'dashscope',
-        'requests',
-        'idna',
-        'certifi',
-        'charset_normalizer',
-        'urllib3',
-    ],
+    hiddenimports=hidden_imports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
