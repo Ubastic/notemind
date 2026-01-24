@@ -1,0 +1,2 @@
+做完每个需求之后，如果前后端都改了，执行deploy\deploy.ps1
+如果只改了前端执行deploy\deployfront.ps1

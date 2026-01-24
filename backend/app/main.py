@@ -1,15 +1,17 @@
 import json
 import logging
 import os
+import re
 import secrets
+import shutil
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from .time_utils import ensure_beijing_tz, now_beijing
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import func, inspect, text
+from fastapi.responses import FileResponse
+from sqlalchemy import func, inspect, or_, text
 from sqlalchemy.orm import Session, defer
 
 from . import ai, crypto, models, schemas, security
@@ -20,14 +22,32 @@ logger = logging.getLogger(__name__)
 
 SEMANTIC_SIMILARITY_THRESHOLD = float(os.getenv("SEMANTIC_SIMILARITY_THRESHOLD", "0.2"))
 SHORT_TITLE_MAX_LEN = int(os.getenv("SHORT_TITLE_MAX_LEN", "32"))
+AI_FEATURE_ENABLED = os.getenv("AI_ENABLED", "false").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+ANON_TAG_PATTERN = re.compile(r"anon_[0-9a-f]{8}", re.IGNORECASE)
+RELATED_KEYWORD_LIMIT = int(os.getenv("RELATED_KEYWORD_LIMIT", "12"))
+RELATED_DEFAULT_LIMIT = int(os.getenv("RELATED_NOTES_LIMIT", "6"))
+WORD_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{2,}")
+CJK_TOKEN_PATTERN = re.compile(r"[\u4e00-\u9fff]{2,}")
+ATTACHMENT_REF_PATTERN = re.compile(r"/api/attachments/(\d+)")
 DEFAULT_CATEGORIES = [
     {"key": "credential", "label": "Credentials"},
     {"key": "work", "label": "Work"},
     {"key": "idea", "label": "Ideas"},
     {"key": "todo", "label": "Todo"},
 ]
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+UPLOAD_DIR = os.path.abspath(os.getenv("UPLOAD_DIR", os.path.join(BASE_DIR, "uploads")))
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "20"))
+AUTH_COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "access_token")
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").strip().lower() in ("1", "true", "yes", "on")
 
 models.Base.metadata.create_all(bind=engine)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 def _ensure_notes_title_column() -> None:
@@ -56,6 +76,20 @@ def _ensure_notes_short_title_column() -> None:
 
 
 _ensure_notes_short_title_column()
+
+
+def _ensure_notes_completed_column() -> None:
+    inspector = inspect(engine)
+    if "notes" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("notes")}
+    if "completed" in columns:
+        return
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE notes ADD COLUMN completed BOOLEAN DEFAULT 0"))
+
+
+_ensure_notes_completed_column()
 
 def _ensure_notes_indexes() -> None:
     inspector = inspect(engine)
@@ -89,9 +123,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-auth_scheme = HTTPBearer()
-
-
 def get_db():
     db = SessionLocal()
     try:
@@ -100,11 +131,25 @@ def get_db():
         db.close()
 
 
+def _extract_token(request: Request) -> Optional[str]:
+    auth_header = request.headers.get("authorization") or ""
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+        if token:
+            return token
+    cookie_token = request.cookies.get(AUTH_COOKIE_NAME)
+    if cookie_token:
+        return cookie_token
+    return None
+
+
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(auth_scheme),
+    request: Request,
     db: Session = Depends(get_db),
 ) -> models.User:
-    token = credentials.credentials
+    token = _extract_token(request)
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     try:
         payload = security.decode_access_token(token)
         user_id = int(payload.get("sub"))
@@ -116,6 +161,119 @@ def get_current_user(
     return user
 
 
+def _get_user_from_request(request: Request, db: Session) -> Optional[models.User]:
+    token = _extract_token(request)
+    if not token:
+        return None
+    try:
+        payload = security.decode_access_token(token)
+        user_id = int(payload.get("sub"))
+    except Exception:
+        return None
+    return db.query(models.User).filter(models.User.id == user_id).first()
+
+
+def _sanitize_filename(name: str) -> str:
+    return os.path.basename(str(name or "").strip()) or "file"
+
+
+def _build_attachment_url(attachment_id: int) -> str:
+    return f"/api/attachments/{attachment_id}"
+
+
+def _extract_attachment_ids(content: Optional[str]) -> List[int]:
+    if not content:
+        return []
+    ids: List[int] = []
+    seen = set()
+    for match in ATTACHMENT_REF_PATTERN.finditer(str(content)):
+        raw = match.group(1)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if value <= 0 or value in seen:
+            continue
+        ids.append(value)
+        seen.add(value)
+    return ids
+
+
+def _sync_note_attachments(
+    db: Session,
+    current_user: models.User,
+    note: models.Note,
+    content: Optional[str],
+) -> None:
+    desired_ids = set(_extract_attachment_ids(content))
+    existing_rows = (
+        db.query(models.NoteAttachment)
+        .filter(models.NoteAttachment.note_id == note.id)
+        .all()
+    )
+    existing_ids = {row.attachment_id for row in existing_rows}
+
+    to_remove = existing_ids - desired_ids
+    to_add = desired_ids - existing_ids
+
+    if to_remove:
+        (
+            db.query(models.NoteAttachment)
+            .filter(
+                models.NoteAttachment.note_id == note.id,
+                models.NoteAttachment.attachment_id.in_(list(to_remove)),
+            )
+            .delete(synchronize_session=False)
+        )
+
+        attachments_to_update = (
+            db.query(models.Attachment)
+            .filter(
+                models.Attachment.user_id == current_user.id,
+                models.Attachment.id.in_(list(to_remove)),
+                models.Attachment.note_id == note.id,
+            )
+            .all()
+        )
+        for attachment in attachments_to_update:
+            replacement = (
+                db.query(models.NoteAttachment.note_id)
+                .filter(models.NoteAttachment.attachment_id == attachment.id)
+                .order_by(models.NoteAttachment.created_at.desc())
+                .first()
+            )
+            attachment.note_id = replacement[0] if replacement else None
+
+    if not to_add:
+        return
+
+    owned_ids = {
+        row[0]
+        for row in (
+            db.query(models.Attachment.id)
+            .filter(
+                models.Attachment.user_id == current_user.id,
+                models.Attachment.id.in_(list(to_add)),
+            )
+            .all()
+        )
+    }
+    for attachment_id in owned_ids:
+        db.add(models.NoteAttachment(note_id=note.id, attachment_id=attachment_id))
+
+    attachments_added = (
+        db.query(models.Attachment)
+        .filter(
+            models.Attachment.user_id == current_user.id,
+            models.Attachment.id.in_(list(owned_ids)),
+        )
+        .all()
+    )
+    for attachment in attachments_added:
+        if attachment.note_id is None:
+            attachment.note_id = note.id
+
+
 def _safe_json_loads(value: Optional[str], default: Any):
     if not value:
         return default
@@ -123,6 +281,16 @@ def _safe_json_loads(value: Optional[str], default: Any):
         return json.loads(value)
     except json.JSONDecodeError:
         return default
+
+
+def _normalize_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return False
 
 
 def _normalize_categories(raw: Any) -> List[Dict[str, str]]:
@@ -168,6 +336,15 @@ def _get_user_categories(user: models.User) -> List[Dict[str, str]]:
 
 def _get_allowed_category_keys(user: models.User) -> List[str]:
     return [item["key"] for item in _get_user_categories(user)]
+
+
+def _get_user_ai_enabled(user: models.User) -> bool:
+    payload = _load_user_settings_payload(user)
+    return _normalize_bool(payload.get("ai_enabled"))
+
+
+def _is_ai_enabled_for_user(user: models.User) -> bool:
+    return AI_FEATURE_ENABLED and _get_user_ai_enabled(user)
 
 
 def _fallback_category(allowed: List[str]) -> str:
@@ -216,9 +393,7 @@ def _note_to_schema(
         )
         if content is None:
             content = ""
-    tags = _safe_json_loads(note.ai_tags, [])
-    if not isinstance(tags, list):
-        tags = []
+    tags = _normalize_tags(_safe_json_loads(note.ai_tags, []))
     entities = _safe_json_loads(note.ai_entities, {})
     if not isinstance(entities, dict):
         entities = {}
@@ -227,6 +402,7 @@ def _note_to_schema(
         title=note.title,
         short_title=note.short_title,
         content=content,
+        completed=bool(getattr(note, "completed", False)),
         ai_category=note.ai_category,
         ai_summary=note.ai_summary,
         ai_tags=tags,
@@ -291,6 +467,61 @@ def _note_matching_keywords(note: models.Note, keywords: List[str], key: bytes) 
     return matches
 
 
+def _dedupe_keywords(items: List[str], limit: int) -> List[str]:
+    deduped: List[str] = []
+    seen = set()
+    for item in items:
+        cleaned = str(item or "").strip()
+        if not cleaned:
+            continue
+        lowered = cleaned.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        deduped.append(cleaned)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
+
+def _extract_keywords_from_text(text: Optional[str], limit: int = 6) -> List[str]:
+    if not text:
+        return []
+    raw = str(text)
+    lowered = raw.lower()
+    tokens = WORD_TOKEN_PATTERN.findall(lowered)
+    if len(tokens) < limit:
+        for block in CJK_TOKEN_PATTERN.findall(raw):
+            if len(tokens) >= limit:
+                break
+            if len(block) <= 4:
+                tokens.append(block)
+                continue
+            for i in range(0, len(block) - 1):
+                tokens.append(block[i : i + 2])
+                if len(tokens) >= limit:
+                    break
+    if not tokens:
+        cleaned = " ".join(raw.split()).strip()
+        if cleaned:
+            tokens.append(cleaned)
+    return tokens[:limit]
+
+
+def _build_related_keywords(note: models.Note, key: bytes) -> List[str]:
+    tokens: List[str] = []
+    tags = _normalize_tags(_safe_json_loads(note.ai_tags, []))
+    tokens.extend(tags)
+    tokens.extend(_extract_keywords_from_text(note.title, limit=4))
+    tokens.extend(_extract_keywords_from_text(note.short_title, limit=4))
+    tokens.extend(_extract_keywords_from_text(note.ai_summary, limit=6))
+    if len(tokens) < 6:
+        content = crypto.decrypt_content(note.content, key) if note.content_encrypted else note.content
+        first_line = _first_non_empty_line(content or "")
+        tokens.extend(_extract_keywords_from_text(first_line, limit=6))
+    return _dedupe_keywords(tokens, RELATED_KEYWORD_LIMIT)
+
+
 def _parse_date(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
@@ -334,13 +565,34 @@ def _cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
+def _is_anonymous_tag(value: str) -> bool:
+    return bool(ANON_TAG_PATTERN.search(value))
+
+
 def _normalize_tags(tags: Any) -> List[str]:
     if isinstance(tags, list):
-        return [str(tag) for tag in tags if str(tag).strip()]
+        normalized: List[str] = []
+        for tag in tags:
+            cleaned = str(tag).strip()
+            if not cleaned or _is_anonymous_tag(cleaned):
+                continue
+            normalized.append(cleaned)
+        return normalized
     if isinstance(tags, str):
         cleaned = tags.strip()
-        return [cleaned] if cleaned else []
+        if not cleaned or _is_anonymous_tag(cleaned):
+            return []
+        return [cleaned]
     return []
+
+
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _tag_like_pattern(tag: str) -> str:
+    token = json.dumps(tag, ensure_ascii=True)
+    return f"%{_escape_like(token)}%"
 
 
 def _anonymize_text(value: Optional[str]) -> str:
@@ -453,12 +705,13 @@ def _semantic_search_notes(
     key: bytes,
     limit: int,
     offset: int,
+    use_ai: bool,
     include_content: bool = True,
 ) -> Tuple[List[schemas.NoteOut], int]:
     keyword_list = keywords or [semantic_query]
     direct_query = (keyword_list[0] if keyword_list else semantic_query).strip()
     direct_query_lower = direct_query.lower()
-    query_embedding = ai.get_embedding(semantic_query)
+    query_embedding = ai.get_embedding(semantic_query, use_ai=use_ai)
     ranked: List[Tuple[Tuple[float, float, float, float, float], float, models.Note, schemas.SearchInfo]] = []
     for note in notes:
         matched_keywords = _note_matching_keywords(note, keyword_list, key)
@@ -534,6 +787,84 @@ def _semantic_search_notes(
     return items, total
 
 
+def _related_notes(
+    note: models.Note,
+    notes: List[models.Note],
+    key: bytes,
+    query_embedding: Optional[List[float]],
+    limit: int,
+) -> Tuple[List[schemas.NoteOut], int, str]:
+    keywords = _build_related_keywords(note, key)
+    direct_query = (keywords[0] if keywords else "").strip()
+    direct_query_lower = direct_query.lower()
+    ranked: List[
+        Tuple[Tuple[float, float, float, float, float], float, models.Note, schemas.SearchInfo]
+    ] = []
+    used_semantic = False
+    for candidate in notes:
+        if candidate.id == note.id:
+            continue
+        matched_keywords = (
+            _note_matching_keywords(candidate, keywords, key) if keywords else []
+        )
+        text_match = bool(matched_keywords)
+        matched_count = len(matched_keywords)
+        direct_match = False
+        if direct_query_lower:
+            direct_match = any(item.lower() == direct_query_lower for item in matched_keywords)
+        similarity = 0.0
+        if query_embedding:
+            note_embedding = _parse_embedding(candidate.embedding)
+            if note_embedding:
+                similarity = _cosine_similarity(query_embedding, note_embedding)
+        has_semantic_match = bool(
+            query_embedding and similarity >= SEMANTIC_SIMILARITY_THRESHOLD
+        )
+        if has_semantic_match:
+            used_semantic = True
+        if not text_match and not has_semantic_match:
+            continue
+        score = similarity
+        if text_match:
+            score += 0.25
+        if matched_count > 1:
+            score += 0.05 * (matched_count - 1)
+        if direct_match:
+            score += 0.35
+        match_type = "keyword" if text_match else "semantic"
+        if text_match and has_semantic_match:
+            match_type = "keyword+semantic"
+        rank_key = (
+            1.0 if direct_match else 0.0,
+            float(matched_count),
+            1.0 if text_match else 0.0,
+            similarity,
+            score,
+        )
+        ranked.append(
+            (
+                rank_key,
+                score,
+                candidate,
+                schemas.SearchInfo(
+                    match_type=match_type,
+                    matched_keywords=matched_keywords,
+                    similarity=similarity,
+                    score=score,
+                ),
+            )
+        )
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    total = len(ranked)
+    sliced = ranked[:limit]
+    mode = "semantic" if used_semantic else "keyword"
+    items = [
+        _note_to_schema(candidate, key, search_info, include_content=False)
+        for _, _, candidate, search_info in sliced
+    ]
+    return items, total, mode
+
+
 @app.post("/api/auth/register", response_model=schemas.UserOut)
 def register(payload: schemas.UserCreate, db: Session = Depends(get_db)):
     existing = db.query(models.User).filter(models.User.username == payload.username).first()
@@ -549,11 +880,21 @@ def register(payload: schemas.UserCreate, db: Session = Depends(get_db)):
 
 
 @app.post("/api/auth/login", response_model=schemas.Token)
-def login(payload: schemas.UserCreate, db: Session = Depends(get_db)):
+def login(payload: schemas.UserCreate, response: Response, db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.username == payload.username).first()
     if not user or not security.verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     token = security.create_access_token({"sub": str(user.id)})
+    max_age = security.ACCESS_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=token,
+        max_age=max_age,
+        httponly=True,
+        samesite="lax",
+        secure=COOKIE_SECURE,
+        path="/",
+    )
     return schemas.Token(access_token=token, token_type="bearer")
 
 
@@ -562,9 +903,18 @@ def me(current_user: models.User = Depends(get_current_user)):
     return current_user
 
 
+@app.post("/api/auth/logout")
+def logout(response: Response):
+    response.delete_cookie(AUTH_COOKIE_NAME, path="/")
+    return {"ok": True}
+
+
 @app.get("/api/settings", response_model=schemas.UserSettings)
 def get_settings(current_user: models.User = Depends(get_current_user)):
-    return schemas.UserSettings(categories=_get_user_categories(current_user))
+    return schemas.UserSettings(
+        categories=_get_user_categories(current_user),
+        ai_enabled=_is_ai_enabled_for_user(current_user),
+    )
 
 
 @app.put("/api/settings", response_model=schemas.UserSettings)
@@ -574,15 +924,26 @@ def update_settings(
     current_user: models.User = Depends(get_current_user),
 ):
     categories = _normalize_categories(payload.categories)
-    settings_payload = {"categories": categories} if categories else {}
-    payload_json = json.dumps(settings_payload) if settings_payload else None
+    if payload.ai_enabled is None:
+        ai_enabled = _get_user_ai_enabled(current_user)
+    else:
+        ai_enabled = _normalize_bool(payload.ai_enabled)
+    if not AI_FEATURE_ENABLED:
+        ai_enabled = False
+    settings_payload: Dict[str, Any] = {"ai_enabled": ai_enabled}
+    if categories:
+        settings_payload["categories"] = categories
+    payload_json = json.dumps(settings_payload)
     if current_user.settings:
         current_user.settings.payload = payload_json
     else:
         current_user.settings = models.UserSettings(user_id=current_user.id, payload=payload_json)
         db.add(current_user.settings)
     db.commit()
-    return schemas.UserSettings(categories=categories or DEFAULT_CATEGORIES)
+    return schemas.UserSettings(
+        categories=categories or DEFAULT_CATEGORIES,
+        ai_enabled=ai_enabled,
+    )
 
 
 @app.post("/api/notes", response_model=schemas.NoteOut)
@@ -593,7 +954,12 @@ def create_note(
 ):
     anonymized, mapping = ai.anonymize_sensitive_data(payload.content)
     allowed_categories = _get_allowed_category_keys(current_user)
-    analysis_anonymized = ai.analyze_note(anonymized, categories=allowed_categories)
+    use_ai = _is_ai_enabled_for_user(current_user)
+    analysis_anonymized = ai.analyze_note(
+        anonymized,
+        categories=allowed_categories,
+        use_ai=use_ai,
+    )
     analysis = _restore_mapping_in_obj(analysis_anonymized, mapping)
 
     title = _normalize_title(payload.title)
@@ -605,10 +971,14 @@ def create_note(
         title,
         prefer_title=bool(payload.title),
     )
-    category = _select_category(allowed_categories, payload.category, analysis.get("category"))
-    tags = analysis.get("tags") or []
-    if not isinstance(tags, list):
-        tags = [str(tags)]
+    override_key = str(payload.category or "").strip().lower()
+    if override_key in allowed_categories:
+        category = override_key
+    elif not use_ai:
+        category = allowed_categories[0] if allowed_categories else "idea"
+    else:
+        category = _select_category(allowed_categories, None, analysis.get("category"))
+    tags = _normalize_tags(analysis.get("tags") or [])
     summary = analysis.get("summary") or payload.content[:120]
     summary = str(summary)
     entities = analysis.get("entities") or {}
@@ -628,7 +998,7 @@ def create_note(
         analysis_anonymized.get("tags") if isinstance(analysis_anonymized, dict) else None,
         title_source,
     )
-    embedding = ai.get_embedding(embedding_source, already_anonymized=True)
+    embedding = ai.get_embedding(embedding_source, already_anonymized=True, use_ai=use_ai)
     embedding_json = json.dumps(embedding) if embedding else None
 
     key = crypto.derive_key(current_user.password_hash, current_user.salt)
@@ -650,6 +1020,8 @@ def create_note(
         updated_at=now_beijing(),
     )
     db.add(note)
+    db.flush()
+    _sync_note_attachments(db, current_user, note, payload.content)
     db.commit()
     db.refresh(note)
     return _note_to_schema(note, key)
@@ -664,18 +1036,29 @@ def list_notes(
     category: Optional[str] = None,
     tag: Optional[str] = None,
     q: Optional[str] = None,
+    time_start: Optional[str] = None,
+    time_end: Optional[str] = None,
     include_content: bool = Query(default=False),
+    include_completed: bool = Query(default=False),
 ):
     query = db.query(models.Note).filter(models.Note.user_id == current_user.id)
+    if not include_completed:
+        query = query.filter(or_(models.Note.completed.is_(None), models.Note.completed.is_(False)))
+    use_ai = _is_ai_enabled_for_user(current_user)
     if category:
         query = query.filter(models.Note.ai_category == category)
     if tag:
-        query = query.filter(models.Note.ai_tags.ilike(f"%{tag}%"))
+        cleaned_tag = str(tag or "").strip()
+        if cleaned_tag:
+            query = query.filter(
+                models.Note.ai_tags.ilike(_tag_like_pattern(cleaned_tag), escape="\\")
+            )
     if q:
-        search_meta = ai.parse_search_query(q)
+        search_meta = ai.parse_search_query(q, use_ai=use_ai)
         semantic_query = search_meta.get("semantic_query") or q
         keywords = search_meta.get("keywords") or [semantic_query]
         query = _apply_time_filter(query, search_meta.get("time_start"), search_meta.get("time_end"))
+        query = _apply_time_filter(query, time_start, time_end)
         notes = query.order_by(models.Note.created_at.desc()).all()
         key = crypto.derive_key(current_user.password_hash, current_user.salt)
         start = (page - 1) * page_size
@@ -686,9 +1069,11 @@ def list_notes(
             key,
             page_size,
             start,
+            use_ai=use_ai,
             include_content=include_content,
         )
         return schemas.NoteListOut(items=items, total=total, page=page, page_size=page_size)
+    query = _apply_time_filter(query, time_start, time_end)
     total = query.count()
     notes_query = query.options(defer(models.Note.embedding))
     if not include_content:
@@ -711,6 +1096,72 @@ def list_notes(
     return schemas.NoteListOut(items=items, total=total, page=page, page_size=page_size)
 
 
+@app.get("/api/notes/timeline", response_model=schemas.TimelineOut)
+def notes_timeline(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+    group: str = Query(default="month"),
+    category: Optional[str] = None,
+    tag: Optional[str] = None,
+    time_start: Optional[str] = None,
+    time_end: Optional[str] = None,
+    include_completed: bool = Query(default=False),
+):
+    group_clean = str(group or "").strip().lower()
+    if group_clean not in ("month", "day"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid group")
+
+    query = db.query(models.Note).filter(models.Note.user_id == current_user.id)
+    if not include_completed:
+        query = query.filter(or_(models.Note.completed.is_(None), models.Note.completed.is_(False)))
+    if category:
+        query = query.filter(models.Note.ai_category == category)
+    if tag:
+        cleaned_tag = str(tag or "").strip()
+        if cleaned_tag:
+            query = query.filter(
+                models.Note.ai_tags.ilike(_tag_like_pattern(cleaned_tag), escape="\\")
+            )
+    query = _apply_time_filter(query, time_start, time_end)
+
+    if group_clean == "day":
+        key_expr = func.strftime("%Y-%m-%d", models.Note.created_at)
+    else:
+        key_expr = func.strftime("%Y-%m", models.Note.created_at)
+
+    rows = (
+        query.with_entities(key_expr.label("key"), func.count(models.Note.id).label("count"))
+        .group_by("key")
+        .order_by(text("key DESC"))
+        .all()
+    )
+    items = [schemas.TimelineBucket(key=row[0] or "", count=int(row[1] or 0)) for row in rows if row[0]]
+    return schemas.TimelineOut(group=group_clean, items=items)
+
+
+@app.get("/api/notes/random", response_model=schemas.NoteOut)
+def random_note(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+    include_completed: bool = Query(default=False),
+):
+    note = (
+        db.query(models.Note)
+        .filter(models.Note.user_id == current_user.id)
+        .filter(
+            text("1=1")
+            if include_completed
+            else or_(models.Note.completed.is_(None), models.Note.completed.is_(False))
+        )
+        .order_by(func.random())
+        .first()
+    )
+    if not note:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No notes available")
+    key = crypto.derive_key(current_user.password_hash, current_user.salt)
+    return _note_to_schema(note, key)
+
+
 @app.get("/api/notes/{note_id}", response_model=schemas.NoteOut)
 def get_note(
     note_id: int,
@@ -728,6 +1179,261 @@ def get_note(
     return _note_to_schema(note, key)
 
 
+@app.post("/api/attachments", response_model=schemas.AttachmentOut)
+def upload_attachment(
+    note_id: Optional[int] = Form(None),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    if not file or not file.filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing file")
+    note = None
+    if note_id is not None:
+        note = (
+            db.query(models.Note)
+            .filter(models.Note.id == note_id, models.Note.user_id == current_user.id)
+            .first()
+        )
+        if not note:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
+    safe_name = _sanitize_filename(file.filename)
+    _, ext = os.path.splitext(safe_name)
+    if len(ext) > 10:
+        ext = ext[:10]
+    token = secrets.token_urlsafe(16)
+    stored_name = f"{token}{ext}"
+    user_dir = os.path.join(UPLOAD_DIR, f"user_{current_user.id}")
+    os.makedirs(user_dir, exist_ok=True)
+    stored_path = os.path.join(user_dir, stored_name)
+    try:
+        with open(stored_path, "wb") as target:
+            shutil.copyfileobj(file.file, target)
+    finally:
+        file.file.close()
+    size = os.path.getsize(stored_path) if os.path.exists(stored_path) else 0
+    max_size = MAX_UPLOAD_MB * 1024 * 1024
+    if max_size > 0 and size > max_size:
+        try:
+            os.remove(stored_path)
+        except OSError:
+            pass
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large")
+    attachment = models.Attachment(
+        user_id=current_user.id,
+        note_id=note.id if note else None,
+        filename=safe_name,
+        stored_name=stored_name,
+        mime_type=file.content_type,
+        size=size,
+    )
+    db.add(attachment)
+    db.commit()
+    db.refresh(attachment)
+    if note is not None:
+        db.add(models.NoteAttachment(note_id=note.id, attachment_id=attachment.id))
+        db.commit()
+    note_ids = {
+        row[0]
+        for row in (
+            db.query(models.NoteAttachment.note_id)
+            .filter(models.NoteAttachment.attachment_id == attachment.id)
+            .all()
+        )
+        if row and row[0]
+    }
+    if attachment.note_id:
+        note_ids.add(attachment.note_id)
+    return schemas.AttachmentOut(
+        id=attachment.id,
+        note_id=attachment.note_id,
+        note_ids=sorted(note_ids),
+        filename=attachment.filename,
+        mime_type=attachment.mime_type,
+        size=attachment.size,
+        url=_build_attachment_url(attachment.id),
+        created_at=attachment.created_at,
+    )
+
+
+@app.get("/api/attachments", response_model=schemas.AttachmentListOut)
+def list_attachments(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    note_id: Optional[int] = None,
+):
+    query = db.query(models.Attachment).filter(models.Attachment.user_id == current_user.id)
+    if note_id is not None:
+        query = (
+            query.outerjoin(
+                models.NoteAttachment,
+                models.NoteAttachment.attachment_id == models.Attachment.id,
+            )
+            .filter(
+                or_(
+                    models.Attachment.note_id == note_id,
+                    models.NoteAttachment.note_id == note_id,
+                )
+            )
+            .distinct()
+        )
+    total = query.count()
+    attachments = (
+        query.order_by(models.Attachment.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    attachment_ids = [attachment.id for attachment in attachments]
+    note_ids_map: Dict[int, set] = {}
+    if attachment_ids:
+        rows = (
+            db.query(models.NoteAttachment.attachment_id, models.NoteAttachment.note_id)
+            .filter(models.NoteAttachment.attachment_id.in_(attachment_ids))
+            .all()
+        )
+        for attachment_id_value, note_id_value in rows:
+            if not attachment_id_value or not note_id_value:
+                continue
+            note_ids_map.setdefault(int(attachment_id_value), set()).add(int(note_id_value))
+    for attachment in attachments:
+        if attachment.note_id:
+            note_ids_map.setdefault(int(attachment.id), set()).add(int(attachment.note_id))
+
+    items = [
+        schemas.AttachmentOut(
+            id=attachment.id,
+            note_id=attachment.note_id,
+            note_ids=sorted(note_ids_map.get(int(attachment.id), set())),
+            filename=attachment.filename,
+            mime_type=attachment.mime_type,
+            size=attachment.size,
+            url=_build_attachment_url(attachment.id),
+            created_at=attachment.created_at,
+        )
+        for attachment in attachments
+    ]
+    return schemas.AttachmentListOut(items=items, total=total, page=page, page_size=page_size)
+
+
+@app.get("/api/attachments/{attachment_id}")
+def get_attachment(
+    attachment_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    share_token: Optional[str] = None,
+):
+    attachment = (
+        db.query(models.Attachment)
+        .filter(models.Attachment.id == attachment_id)
+        .first()
+    )
+    if not attachment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    user = _get_user_from_request(request, db)
+    if user:
+        if attachment.user_id != user.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    else:
+        if not share_token:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+        share = (
+            db.query(models.Share)
+            .filter(models.Share.share_token == share_token)
+            .first()
+        )
+        if not share:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share not found")
+        if share.expires_at and ensure_beijing_tz(share.expires_at) < now_beijing():
+            raise HTTPException(status_code=status.HTTP_410_GONE, detail="Share expired")
+        if not attachment.note_id or attachment.note_id != share.note_id:
+            linked = (
+                db.query(models.NoteAttachment)
+                .filter(
+                    models.NoteAttachment.note_id == share.note_id,
+                    models.NoteAttachment.attachment_id == attachment.id,
+                )
+                .first()
+            )
+            if not linked:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    file_path = os.path.join(UPLOAD_DIR, f"user_{attachment.user_id}", attachment.stored_name)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing")
+    return FileResponse(
+        file_path,
+        media_type=attachment.mime_type or "application/octet-stream",
+        filename=attachment.filename,
+    )
+
+
+@app.delete("/api/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_attachment(
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    attachment = (
+        db.query(models.Attachment)
+        .filter(models.Attachment.id == attachment_id, models.Attachment.user_id == current_user.id)
+        .first()
+    )
+    if not attachment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    (
+        db.query(models.NoteAttachment)
+        .filter(models.NoteAttachment.attachment_id == attachment.id)
+        .delete(synchronize_session=False)
+    )
+    file_path = os.path.join(UPLOAD_DIR, f"user_{attachment.user_id}", attachment.stored_name)
+    if os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+        except OSError:
+            logger.warning("Failed to remove attachment file: %s", file_path)
+    db.delete(attachment)
+    db.commit()
+    return None
+
+
+@app.get("/api/notes/{note_id}/related", response_model=schemas.RelatedNotesOut)
+def related_notes(
+    note_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+    limit: int = Query(default=RELATED_DEFAULT_LIMIT, ge=1, le=20),
+    include_completed: bool = Query(default=False),
+):
+    note = (
+        db.query(models.Note)
+        .filter(models.Note.id == note_id, models.Note.user_id == current_user.id)
+        .first()
+    )
+    if not note:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
+    use_ai = _is_ai_enabled_for_user(current_user)
+    query_embedding = _parse_embedding(note.embedding) if use_ai else None
+    notes_query = (
+        db.query(models.Note)
+        .filter(models.Note.user_id == current_user.id, models.Note.id != note_id)
+        .filter(
+            text("1=1")
+            if include_completed
+            else or_(models.Note.completed.is_(None), models.Note.completed.is_(False))
+        )
+        .order_by(models.Note.created_at.desc())
+    )
+    if not query_embedding:
+        notes_query = notes_query.options(defer(models.Note.embedding))
+    notes = notes_query.all()
+    key = crypto.derive_key(current_user.password_hash, current_user.salt)
+    items, total, mode = _related_notes(note, notes, key, query_embedding, limit)
+    return schemas.RelatedNotesOut(items=items, total=total, mode=mode)
+
+
 @app.put("/api/notes/{note_id}", response_model=schemas.NoteOut)
 def update_note(
     note_id: int,
@@ -743,10 +1449,23 @@ def update_note(
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
 
+    if payload.content is None:
+        if payload.completed is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing content")
+        note.completed = bool(payload.completed)
+        note.updated_at = now_beijing()
+        db.commit()
+        db.refresh(note)
+        key = crypto.derive_key(current_user.password_hash, current_user.salt)
+        return _note_to_schema(note, key)
+
     anonymized, mapping = ai.anonymize_sensitive_data(payload.content)
     allowed_categories = _get_allowed_category_keys(current_user)
+    use_ai = _is_ai_enabled_for_user(current_user)
     analysis_anonymized = (
-        ai.analyze_note(anonymized, categories=allowed_categories) if payload.reanalyze else {}
+        ai.analyze_note(anonymized, categories=allowed_categories, use_ai=use_ai)
+        if payload.reanalyze
+        else {}
     )
     analysis = _restore_mapping_in_obj(analysis_anonymized, mapping)
 
@@ -768,9 +1487,7 @@ def update_note(
         analysis_category = str(analysis.get("category") or "").strip().lower()
         if analysis_category in allowed_categories:
             note.ai_category = analysis_category
-        tags = analysis.get("tags") or _safe_json_loads(note.ai_tags, [])
-        if not isinstance(tags, list):
-            tags = [str(tags)]
+        tags = _normalize_tags(analysis.get("tags") or _safe_json_loads(note.ai_tags, []))
         note.ai_tags = json.dumps(tags)
         summary = analysis.get("summary") or note.ai_summary
         note.ai_summary = str(summary) if summary is not None else note.ai_summary
@@ -785,13 +1502,29 @@ def update_note(
             analysis_anonymized.get("tags") if isinstance(analysis_anonymized, dict) else None,
             analysis_anonymized.get("title") if isinstance(analysis_anonymized, dict) else None,
         )
-        embedding = ai.get_embedding(embedding_source, already_anonymized=True)
+        embedding = ai.get_embedding(embedding_source, already_anonymized=True, use_ai=use_ai)
         note.embedding = json.dumps(embedding) if embedding else note.embedding
+
+    if payload.short_title is not None:
+        note.short_title = _normalize_short_title(payload.short_title)
+
+    if payload.category is not None:
+        cat_key = str(payload.category).strip().lower()
+        if cat_key in allowed_categories:
+            note.ai_category = cat_key
+
+    if payload.tags is not None:
+        note.ai_tags = json.dumps(_normalize_tags(payload.tags))
+
+    if payload.completed is not None:
+        note.completed = bool(payload.completed)
 
     key = crypto.derive_key(current_user.password_hash, current_user.salt)
     note.content = crypto.encrypt_content(payload.content, key)
     note.content_encrypted = True
     note.updated_at = now_beijing()
+
+    _sync_note_attachments(db, current_user, note, payload.content)
 
     db.commit()
     db.refresh(note)
@@ -811,6 +1544,67 @@ def delete_note(
     )
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
+    linked_attachment_ids = [
+        row[0]
+        for row in (
+            db.query(models.NoteAttachment.attachment_id)
+            .filter(models.NoteAttachment.note_id == note.id)
+            .all()
+        )
+    ]
+    (
+        db.query(models.NoteAttachment)
+        .filter(models.NoteAttachment.note_id == note.id)
+        .delete(synchronize_session=False)
+    )
+
+    attachments = db.query(models.Attachment).filter(models.Attachment.note_id == note.id).all()
+    for attachment in attachments:
+        still_linked = (
+            db.query(models.NoteAttachment)
+            .filter(models.NoteAttachment.attachment_id == attachment.id)
+            .count()
+            > 0
+        )
+        if still_linked:
+            attachment.note_id = None
+            continue
+        file_path = os.path.join(UPLOAD_DIR, f"user_{attachment.user_id}", attachment.stored_name)
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                logger.warning("Failed to remove attachment file: %s", file_path)
+        db.delete(attachment)
+
+    if linked_attachment_ids:
+        attachments_linked_only = (
+            db.query(models.Attachment)
+            .filter(
+                models.Attachment.user_id == current_user.id,
+                models.Attachment.id.in_(linked_attachment_ids),
+                models.Attachment.note_id.is_(None),
+            )
+            .all()
+        )
+        for attachment in attachments_linked_only:
+            still_linked = (
+                db.query(models.NoteAttachment)
+                .filter(models.NoteAttachment.attachment_id == attachment.id)
+                .count()
+                > 0
+            )
+            if still_linked:
+                continue
+            file_path = os.path.join(
+                UPLOAD_DIR, f"user_{attachment.user_id}", attachment.stored_name
+            )
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    logger.warning("Failed to remove attachment file: %s", file_path)
+            db.delete(attachment)
     db.delete(note)
     db.commit()
     return None
@@ -823,13 +1617,24 @@ def search_notes(
     current_user: models.User = Depends(get_current_user),
 ):
     query = db.query(models.Note).filter(models.Note.user_id == current_user.id)
-    search_meta = ai.parse_search_query(payload.query)
+    if not payload.include_completed:
+        query = query.filter(or_(models.Note.completed.is_(None), models.Note.completed.is_(False)))
+    use_ai = _is_ai_enabled_for_user(current_user)
+    search_meta = ai.parse_search_query(payload.query, use_ai=use_ai)
     semantic_query = search_meta.get("semantic_query") or payload.query
     keywords = search_meta.get("keywords") or [semantic_query]
     query = _apply_time_filter(query, search_meta.get("time_start"), search_meta.get("time_end"))
     notes = query.order_by(models.Note.created_at.desc()).all()
     key = crypto.derive_key(current_user.password_hash, current_user.salt)
-    items, total = _semantic_search_notes(notes, semantic_query, keywords, key, payload.limit, 0)
+    items, total = _semantic_search_notes(
+        notes,
+        semantic_query,
+        keywords,
+        key,
+        payload.limit,
+        0,
+        use_ai=use_ai,
+    )
     return schemas.NoteListOut(items=items, total=total, page=1, page_size=payload.limit)
 
 
@@ -839,6 +1644,12 @@ def rebuild_embeddings(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    use_ai = _is_ai_enabled_for_user(current_user)
+    if not use_ai:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="AI is disabled; embeddings are unavailable.",
+        )
     base_query = db.query(models.Note).filter(models.Note.user_id == current_user.id)
     total = base_query.count()
     query = base_query.order_by(models.Note.id.desc())
@@ -862,6 +1673,7 @@ def rebuild_embeddings(
                 analysis_anonymized = ai.analyze_note(
                     anonymized_content,
                     categories=allowed_categories,
+                    use_ai=use_ai,
                 )
                 analysis = _restore_mapping_in_obj(analysis_anonymized, mapping)
                 if not isinstance(analysis, dict):
@@ -869,9 +1681,7 @@ def rebuild_embeddings(
                 analysis_category = str(analysis.get("category") or "").strip().lower()
                 if analysis_category in allowed_categories:
                     note.ai_category = analysis_category
-                tags = analysis.get("tags") or _safe_json_loads(note.ai_tags, [])
-                if not isinstance(tags, list):
-                    tags = [str(tags)]
+                tags = _normalize_tags(analysis.get("tags") or _safe_json_loads(note.ai_tags, []))
                 note.ai_tags = json.dumps(tags)
                 summary = analysis.get("summary") or note.ai_summary
                 note.ai_summary = str(summary) if summary is not None else note.ai_summary
@@ -907,7 +1717,7 @@ def rebuild_embeddings(
             embedding_source = _build_embedding_source(
                 anonymized_content, summary_source, tags_source, title_source
             )
-            embedding = ai.get_embedding(embedding_source, already_anonymized=True)
+            embedding = ai.get_embedding(embedding_source, already_anonymized=True, use_ai=use_ai)
             if not embedding:
                 failed += 1
                 failures.append(note.id)
@@ -929,23 +1739,6 @@ def rebuild_embeddings(
         failures=failures,
         next_cursor=next_cursor,
     )
-
-
-@app.get("/api/notes/random", response_model=schemas.NoteOut)
-def random_note(
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
-):
-    note = (
-        db.query(models.Note)
-        .filter(models.Note.user_id == current_user.id)
-        .order_by(func.random())
-        .first()
-    )
-    if not note:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No notes available")
-    key = crypto.derive_key(current_user.password_hash, current_user.salt)
-    return _note_to_schema(note, key)
 
 
 @app.post("/api/shares", response_model=schemas.ShareOut)
@@ -1012,6 +1805,12 @@ def ai_ask(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    use_ai = _is_ai_enabled_for_user(current_user)
+    if not use_ai:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="AI is disabled; enable it to ask questions.",
+        )
     query = payload.query.lower()
     notes = (
         db.query(models.Note)
@@ -1027,7 +1826,7 @@ def ai_ask(
         tags = note.ai_tags or ""
         if query in summary.lower() or query in tags.lower():
             matching.append(_note_to_schema(note, key))
-    answer = ai.answer_question(payload.query, [note.content for note in matching])
+    answer = ai.answer_question(payload.query, [note.content for note in matching], use_ai=use_ai)
     return schemas.AIAskResponse(answer=answer, matches=matching[:5])
 
 
@@ -1037,6 +1836,12 @@ def ai_summarize(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    use_ai = _is_ai_enabled_for_user(current_user)
+    if not use_ai:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="AI is disabled; enable it to summarize notes.",
+        )
     cutoff = now_beijing() - timedelta(days=payload.days)
     notes = (
         db.query(models.Note)
@@ -1046,5 +1851,5 @@ def ai_summarize(
     )
     key = crypto.derive_key(current_user.password_hash, current_user.salt)
     contents = [crypto.decrypt_content(note.content, key) for note in notes]
-    summary = ai.summarize_notes(contents, payload.days)
+    summary = ai.summarize_notes(contents, payload.days, use_ai=use_ai)
     return schemas.AISummaryResponse(summary=summary)

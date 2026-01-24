@@ -34,6 +34,7 @@ LLM_API_KEY = os.getenv("LLM_API_KEY") or os.getenv("DASHSCOPE_API_KEY")
 LLM_API_BASE_URL = os.getenv("LLM_API_BASE_URL", "").rstrip("/")
 LLM_CHAT_MODEL = os.getenv("LLM_CHAT_MODEL", "")
 LLM_EMBED_MODEL = os.getenv("LLM_EMBED_MODEL", "")
+AI_ENABLED = os.getenv("AI_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
 SHORT_TITLE_MAX_LEN = int(os.getenv("SHORT_TITLE_MAX_LEN", "32"))
 
 
@@ -332,6 +333,10 @@ def _parse_qwen_json(raw: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _llm_allowed(use_ai: bool) -> bool:
+    return AI_ENABLED and use_ai
+
+
 def _provider_enabled(provider: str) -> bool:
     return LLM_PROVIDER == provider and bool(LLM_API_KEY)
 
@@ -416,9 +421,16 @@ def _normalize_search_parse(parsed: Optional[Dict[str, Any]], query: str) -> Dic
     }
 
 
-def parse_search_query(query: str, now: Optional[datetime] = None) -> Dict[str, Any]:
+def parse_search_query(
+    query: str,
+    now: Optional[datetime] = None,
+    use_ai: bool = False,
+) -> Dict[str, Any]:
     now = now or now_beijing()
     anonymized_query, mapping = anonymize_sensitive_data(query)
+    if not _llm_allowed(use_ai):
+        normalized = _normalize_search_parse(None, anonymized_query)
+        return _restore_mapping_in_obj(normalized, mapping)
     prompt = (
         "You extract search intent and time range for a personal notes app. "
         "Return ONLY valid JSON with keys: semantic_query, keywords, time_start, time_end. "
@@ -457,18 +469,25 @@ def _openai_embedding(text: str) -> Optional[List[float]]:
         return None
 
 
-def analyze_note(content: str, categories: Optional[List[str]] = None) -> Dict[str, Any]:
+def analyze_note(
+    content: str,
+    categories: Optional[List[str]] = None,
+    use_ai: bool = False,
+) -> Dict[str, Any]:
+    use_llm = _llm_allowed(use_ai)
+    dashscope_ready = _dashscope_ready() if use_llm else False
     logger.info(
-        "AI analyze_note start provider=%s dashscope_ready=%s base_url=%s has_key=%s has_dashscope=%s",
+        "AI analyze_note start provider=%s ai_enabled=%s dashscope_ready=%s base_url=%s has_key=%s has_dashscope=%s",
         LLM_PROVIDER,
-        _dashscope_ready(),
+        use_llm,
+        dashscope_ready,
         bool(LLM_API_BASE_URL),
         bool(LLM_API_KEY),
         HAS_DASHSCOPE,
     )
     category_options = _normalize_category_options(categories)
     category_hint = json.dumps(category_options)
-    if _dashscope_ready():
+    if dashscope_ready:
         prompt = (
             "Analyze the note and respond in JSON with keys: "
             "short_title, title, category, tags, summary, entities, sensitivity. "
@@ -494,13 +513,14 @@ def analyze_note(content: str, categories: Optional[List[str]] = None) -> Dict[s
         f"Category must be one of {category_hint}. "
         f"short_title must be <= {SHORT_TITLE_MAX_LEN} characters."
     )
-    response = _openai_chat(f"{prompt}\n\nNote:\n{content}\n")
-    if response:
-        parsed = _parse_qwen_json(response)
-        if parsed:
-            logger.info("AI analyze_note: openai-compatible success")
-            return parsed
-        logger.info("AI analyze_note: openai-compatible response unparseable")
+    if use_llm:
+        response = _openai_chat(f"{prompt}\n\nNote:\n{content}\n")
+        if response:
+            parsed = _parse_qwen_json(response)
+            if parsed:
+                logger.info("AI analyze_note: openai-compatible success")
+                return parsed
+            logger.info("AI analyze_note: openai-compatible response unparseable")
 
     logger.info("AI analyze_note: fallback to heuristic")
     category = _heuristic_category(content, categories=category_options)
@@ -515,7 +535,13 @@ def analyze_note(content: str, categories: Optional[List[str]] = None) -> Dict[s
     }
 
 
-def get_embedding(text: str, already_anonymized: bool = False) -> Optional[List[float]]:
+def get_embedding(
+    text: str,
+    already_anonymized: bool = False,
+    use_ai: bool = False,
+) -> Optional[List[float]]:
+    if not _llm_allowed(use_ai):
+        return None
     embedding_text = text
     if not already_anonymized:
         embedding_text, _ = anonymize_sensitive_data(text)
@@ -539,9 +565,12 @@ def get_embedding(text: str, already_anonymized: bool = False) -> Optional[List[
     return _openai_embedding(embedding_text)
 
 
-def summarize_notes(notes: List[str], days: int) -> str:
+def summarize_notes(notes: List[str], days: int, use_ai: bool = False) -> str:
     if not notes:
         return "No notes found for the selected period."
+    if not _llm_allowed(use_ai):
+        joined_original = "\n".join(notes)
+        return f"Summary ({days} days): " + (joined_original[:400] + "...")
     mapping: Dict[str, str] = {}
     anonymized_notes: List[str] = []
     for note in notes:
@@ -570,9 +599,11 @@ def summarize_notes(notes: List[str], days: int) -> str:
     return f"Summary ({days} days): " + (joined_original[:400] + "...")
 
 
-def answer_question(question: str, notes: List[str]) -> str:
+def answer_question(question: str, notes: List[str], use_ai: bool = False) -> str:
     if not notes:
         return "No matching notes found."
+    if not _llm_allowed(use_ai):
+        return notes[0][:200]
     mapping: Dict[str, str] = {}
     anonymized_question, question_mapping = anonymize_sensitive_data(question)
     mapping.update(question_mapping)

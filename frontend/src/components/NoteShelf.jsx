@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+import { useLanguage } from "../context/LanguageContext";
 
 const truncate = (text, limit) => {
   if (!text) return "";
@@ -9,13 +9,14 @@ const truncate = (text, limit) => {
   return `${text.slice(0, limit)}...`;
 };
 
-const getTitle = (note) => {
-  const raw = note?.short_title || note?.title || note?.ai_summary || "Untitled note";
+const getTitle = (note, untitledLabel) => {
+  const raw = note?.short_title || note?.title || note?.ai_summary || untitledLabel;
   const trimmed = String(raw || "").trim();
-  return trimmed || "Untitled note";
+  return trimmed || untitledLabel;
 };
 
-const getShortTitle = (note, limit = 28) => truncate(getTitle(note), limit);
+const getShortTitle = (note, limit, untitledLabel) =>
+  truncate(getTitle(note, untitledLabel), limit);
 
 const getGroupKey = (note, groupBy) => {
   const iso = note?.created_at;
@@ -29,18 +30,18 @@ const sortGroupKeys = (a, b) => {
   return a < b ? 1 : -1;
 };
 
-const buildGroupMeta = (key, groupBy) => {
+const buildGroupMeta = (key, groupBy, monthsShort, unknownLabel) => {
   if (!key || key === "unknown") {
     return {
-      label: "Unknown",
+      label: unknownLabel,
       year: "",
-      monthLabel: "Unknown",
+      monthLabel: unknownLabel,
       day: "",
     };
   }
   const [year, month, day] = key.split("-");
   const monthIndex = Math.max(0, Number.parseInt(month, 10) - 1);
-  const monthLabel = MONTHS[monthIndex] || month;
+  const monthLabel = monthsShort[monthIndex] || month;
   if (groupBy === "month") {
     return {
       label: `${monthLabel} ${year}`,
@@ -66,10 +67,15 @@ const formatItemStamp = (iso, groupBy) => {
 };
 
 export default function NoteShelf({ notes = [], groupBy = "month" }) {
+  const { t, monthsShort } = useLanguage();
+  const location = useLocation();
+  const untitledLabel = t("common.untitledNote");
+  const unknownLabel = t("common.unknown");
   const safeNotes = Array.isArray(notes) ? notes : [];
   const [openKey, setOpenKey] = useState("");
   const [activeKey, setActiveKey] = useState("");
   const sectionRefs = useRef({});
+  const timelineListRef = useRef(null);
 
   const grouped = useMemo(() => {
     const acc = {};
@@ -96,10 +102,10 @@ export default function NoteShelf({ notes = [], groupBy = "month" }) {
           key,
           notes: items,
           count: items.length,
-          ...buildGroupMeta(key, groupBy),
+          ...buildGroupMeta(key, groupBy, monthsShort, unknownLabel),
         };
       }),
-    [groupKeys, grouped, groupBy]
+    [groupKeys, grouped, groupBy, monthsShort, unknownLabel]
   );
 
   useEffect(() => {
@@ -111,27 +117,43 @@ export default function NoteShelf({ notes = [], groupBy = "month" }) {
       setActiveKey("");
       return;
     }
-    setActiveKey((prev) => (groupKeys.includes(prev) ? prev : groupKeys[0]));
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries.filter((entry) => entry.isIntersecting);
-        if (!visible.length) return;
-        visible.sort(
-          (a, b) =>
-            Math.abs(a.boundingClientRect.top) - Math.abs(b.boundingClientRect.top)
-        );
-        const next = visible[0].target.dataset.group;
-        if (next) {
-          setActiveKey(next);
+    const updateActive = () => {
+      const anchor = window.innerHeight * 0.25;
+      let nextKey = "";
+      let closest = Number.POSITIVE_INFINITY;
+      groupKeys.forEach((key) => {
+        const el = sectionRefs.current[key];
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        if (rect.bottom <= 0) return;
+        const distance = Math.abs(rect.top - anchor);
+        if (distance < closest) {
+          closest = distance;
+          nextKey = key;
         }
-      },
-      { rootMargin: "-20% 0px -60% 0px", threshold: [0.1, 0.4, 0.7] }
-    );
-    groupKeys.forEach((key) => {
-      const el = sectionRefs.current[key];
-      if (el) observer.observe(el);
-    });
-    return () => observer.disconnect();
+      });
+      if (nextKey) {
+        setActiveKey((prev) => (prev === nextKey ? prev : nextKey));
+      }
+    };
+    let rafId = null;
+    const handleScroll = () => {
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        updateActive();
+      });
+    };
+    handleScroll();
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    window.addEventListener("resize", handleScroll);
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      window.removeEventListener("resize", handleScroll);
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+    };
   }, [groupKeys]);
 
   const handleJump = (key) => {
@@ -141,8 +163,20 @@ export default function NoteShelf({ notes = [], groupBy = "month" }) {
     }
   };
 
+  useEffect(() => {
+    const listEl = timelineListRef.current;
+    if (!listEl || !activeKey) return;
+    const activeEl = listEl.querySelector(`[data-group="${activeKey}"]`);
+    if (!activeEl) return;
+    requestAnimationFrame(() => {
+      const targetTop =
+        activeEl.offsetTop - (listEl.clientHeight / 2 - activeEl.offsetHeight / 2);
+      listEl.scrollTop = Math.max(0, targetTop);
+    });
+  }, [activeKey]);
+
   if (!groupKeys.length) {
-    return <div className="empty-state">No notes yet.</div>;
+    return <div className="empty-state">{t("common.noNotes")}</div>;
   }
 
   return (
@@ -177,7 +211,9 @@ export default function NoteShelf({ notes = [], groupBy = "month" }) {
                       <div className="note-shelf-title">{group.label}</div>
                     </div>
                     <div className="note-shelf-header-right">
-                      <span className="note-shelf-count">{group.count} notes</span>
+                      <span className="note-shelf-count">
+                        {t("common.notesCount", { count: group.count })}
+                      </span>
                       <span className="note-shelf-toggle" aria-hidden="true">
                         &gt;
                       </span>
@@ -186,12 +222,14 @@ export default function NoteShelf({ notes = [], groupBy = "month" }) {
                   <div className="note-shelf-spines">
                     {previewNotes.map((note) => (
                       <span key={note.id} className="note-shelf-spine">
-                        {getShortTitle(note, 18)}
+                        {getShortTitle(note, 18, untitledLabel)}
                       </span>
                     ))}
                   </div>
                   {extraCount > 0 ? (
-                    <div className="note-shelf-more">+{extraCount} more</div>
+                    <div className="note-shelf-more">
+                      {t("common.notesMore", { count: extraCount })}
+                    </div>
                   ) : null}
                 </button>
                 <div
@@ -201,8 +239,15 @@ export default function NoteShelf({ notes = [], groupBy = "month" }) {
                 >
                   <div className="note-shelf-panel-inner">
                     {group.notes.map((note) => (
-                      <Link key={note.id} className="note-shelf-item" to={`/note/${note.id}`}>
-                        <span className="note-shelf-item-title">{getShortTitle(note, 36)}</span>
+                      <Link
+                        key={note.id}
+                        className="note-shelf-item"
+                        to={`/note/${note.id}`}
+                        state={{ from: `${location.pathname}${location.search}` }}
+                      >
+                        <span className="note-shelf-item-title">
+                          {getShortTitle(note, 36, untitledLabel)}
+                        </span>
                         <span className="note-shelf-item-meta">
                           {formatItemStamp(note.created_at, groupBy)}
                         </span>
@@ -215,17 +260,18 @@ export default function NoteShelf({ notes = [], groupBy = "month" }) {
           })}
         </div>
       </div>
-      <aside className="timeline-rail" aria-label="Timeline">
+      <aside className="timeline-rail" aria-label={t("nav.timeline")}>
         {groups.length === 0 ? (
-          <div className="timeline-empty">No dates yet</div>
+          <div className="timeline-empty">{t("common.noDates")}</div>
         ) : (
-          <div className="timeline-list">
+          <div className="timeline-list" ref={timelineListRef}>
             {groups.map((group) => {
               const isMonth = groupBy === "month";
               return (
                 <button
                   key={group.key}
                   className={`timeline-item ${activeKey === group.key ? "active" : ""}`}
+                  data-group={group.key}
                   type="button"
                   onClick={() => handleJump(group.key)}
                 >

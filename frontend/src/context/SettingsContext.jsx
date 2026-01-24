@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 
 import { apiFetch } from "../api";
 import { useAuth } from "./AuthContext";
+import { useLanguage } from "./LanguageContext";
 
 const DEFAULT_CATEGORIES = [
   { key: "credential", label: "Credentials" },
@@ -9,6 +10,16 @@ const DEFAULT_CATEGORIES = [
   { key: "idea", label: "Ideas" },
   { key: "todo", label: "Todo" },
 ];
+
+const SHOW_COMPLETED_KEY = "notemind_show_completed";
+
+const getInitialShowCompleted = () => {
+  if (typeof window === "undefined") return false;
+  const stored = window.localStorage.getItem(SHOW_COMPLETED_KEY);
+  if (stored === "true") return true;
+  if (stored === "false") return false;
+  return false;
+};
 
 const SettingsContext = createContext(null);
 
@@ -30,14 +41,30 @@ const normalizeCategories = (categories) => {
 };
 
 export function SettingsProvider({ children }) {
-  const { token } = useAuth();
-  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  const { isAuthenticated } = useAuth();
+  const { t, defaultCategories: localeDefaultCategories } = useLanguage();
+  const resolvedDefaultCategories = useMemo(() => {
+    const base =
+      Array.isArray(localeDefaultCategories) && localeDefaultCategories.length
+        ? localeDefaultCategories
+        : DEFAULT_CATEGORIES;
+    return base.map((category) => ({ ...category }));
+  }, [localeDefaultCategories]);
+  const [categories, setCategories] = useState(resolvedDefaultCategories);
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [showCompleted, setShowCompleted] = useState(getInitialShowCompleted);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(SHOW_COMPLETED_KEY, showCompleted ? "true" : "false");
+  }, [showCompleted]);
+
   const loadSettings = useCallback(async () => {
-    if (!token) {
-      setCategories(DEFAULT_CATEGORIES);
+    if (!isAuthenticated) {
+      setCategories(resolvedDefaultCategories);
+      setAiEnabled(false);
       setError("");
       setLoading(false);
       return;
@@ -47,39 +74,77 @@ export function SettingsProvider({ children }) {
     try {
       const data = await apiFetch("/settings");
       const normalized = normalizeCategories(data.categories);
-      setCategories(normalized.length ? normalized : DEFAULT_CATEGORIES);
+      setCategories(normalized.length ? normalized : resolvedDefaultCategories);
+      setAiEnabled(Boolean(data.ai_enabled));
     } catch (err) {
-      setError(err.message || "Failed to load settings");
-      setCategories(DEFAULT_CATEGORIES);
+      setError(err.message || t("errors.loadSettings"));
+      setCategories(resolvedDefaultCategories);
+      setAiEnabled(false);
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [isAuthenticated, resolvedDefaultCategories, t]);
 
   useEffect(() => {
     loadSettings();
   }, [loadSettings]);
 
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setCategories(resolvedDefaultCategories);
+    }
+  }, [resolvedDefaultCategories, isAuthenticated]);
+
   const saveCategories = useCallback(
     async (nextCategories) => {
-      if (!token) {
-        return { ok: false, error: "Not authenticated" };
+      if (!isAuthenticated) {
+        return { ok: false, error: t("errors.notAuthenticated") };
       }
       const normalized = normalizeCategories(nextCategories);
       try {
         const data = await apiFetch("/settings", {
           method: "PUT",
-          body: { categories: normalized },
+          body: { categories: normalized, ai_enabled: aiEnabled },
         });
         const resolved = normalizeCategories(data.categories);
-        const finalCategories = resolved.length ? resolved : DEFAULT_CATEGORIES;
+        const finalCategories = resolved.length ? resolved : resolvedDefaultCategories;
         setCategories(finalCategories);
-        return { ok: true, categories: finalCategories };
+        setAiEnabled(Boolean(data.ai_enabled));
+        return { ok: true, categories: finalCategories, aiEnabled: Boolean(data.ai_enabled) };
       } catch (err) {
-        return { ok: false, error: err.message || "Failed to save settings" };
+        return { ok: false, error: err.message || t("errors.saveSettings") };
       }
     },
-    [token]
+    [isAuthenticated, aiEnabled, resolvedDefaultCategories, t]
+  );
+
+  const saveAiEnabled = useCallback(
+    async (nextEnabled) => {
+      if (!isAuthenticated) {
+        return { ok: false, error: t("errors.notAuthenticated") };
+      }
+      const normalized = normalizeCategories(categories);
+      try {
+        const data = await apiFetch("/settings", {
+          method: "PUT",
+          body: { categories: normalized, ai_enabled: Boolean(nextEnabled) },
+        });
+        const resolved = normalizeCategories(data.categories);
+        const finalCategories = resolved.length ? resolved : resolvedDefaultCategories;
+        if (JSON.stringify(finalCategories) !== JSON.stringify(categories)) {
+          setCategories(finalCategories);
+        }
+        setAiEnabled(Boolean(data.ai_enabled));
+        return {
+          ok: true,
+          categories: finalCategories,
+          aiEnabled: Boolean(data.ai_enabled),
+        };
+      } catch (err) {
+        return { ok: false, error: err.message || t("errors.saveSettings") };
+      }
+    },
+    [isAuthenticated, categories, resolvedDefaultCategories, t]
   );
 
   const categoryLabels = useMemo(() => {
@@ -94,13 +159,28 @@ export function SettingsProvider({ children }) {
     () => ({
       categories,
       categoryLabels,
+      aiEnabled,
+      showCompleted,
+      setShowCompleted,
       loading,
       error,
       refreshSettings: loadSettings,
       saveCategories,
-      defaultCategories: DEFAULT_CATEGORIES,
+      saveAiEnabled,
+      defaultCategories: resolvedDefaultCategories,
     }),
-    [categories, categoryLabels, loading, error, loadSettings, saveCategories]
+    [
+      categories,
+      categoryLabels,
+      aiEnabled,
+      showCompleted,
+      loading,
+      error,
+      loadSettings,
+      saveCategories,
+      saveAiEnabled,
+      resolvedDefaultCategories,
+    ]
   );
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

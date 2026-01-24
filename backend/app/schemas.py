@@ -25,6 +25,7 @@ class CategoryConfig(BaseModel):
 
 class UserSettings(BaseModel):
     categories: List[CategoryConfig] = Field(default_factory=list)
+    ai_enabled: Optional[bool] = None
 
 
 class Token(BaseModel):
@@ -39,9 +40,13 @@ class NoteCreate(BaseModel):
 
 
 class NoteUpdate(BaseModel):
-    content: str = Field(min_length=1)
+    content: Optional[str] = None
+    completed: Optional[bool] = None
     reanalyze: bool = True
     title: Optional[str] = Field(default=None, max_length=200)
+    short_title: Optional[str] = Field(default=None, max_length=200)
+    category: Optional[str] = None
+    tags: Optional[List[str]] = None
 
 
 class SearchInfo(BaseModel):
@@ -56,6 +61,7 @@ class NoteOut(BaseModel):
     title: Optional[str] = None
     short_title: Optional[str] = None
     content: str
+    completed: bool = False
     ai_category: Optional[str] = None
     ai_summary: Optional[str] = None
     ai_tags: List[str] = Field(default_factory=list)
@@ -74,6 +80,22 @@ class NoteListOut(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class TimelineBucket(BaseModel):
+    key: str
+    count: int
+
+
+class TimelineOut(BaseModel):
+    group: str
+    items: List[TimelineBucket]
+
+
+class RelatedNotesOut(BaseModel):
+    items: List[NoteOut]
+    total: int
+    mode: str
 
 
 class ShareCreate(BaseModel):
@@ -98,9 +120,31 @@ class ShareView(BaseModel):
     view_count: int
 
 
+class AttachmentOut(BaseModel):
+    id: int
+    note_id: Optional[int] = None
+    note_ids: List[int] = Field(default_factory=list)
+    filename: str
+    mime_type: Optional[str] = None
+    size: Optional[int] = None
+    url: str
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+
+class AttachmentListOut(BaseModel):
+    items: List[AttachmentOut]
+    total: int
+    page: int
+    page_size: int
+
+
 class SearchQuery(BaseModel):
     query: str = Field(min_length=1)
     limit: int = Field(default=10, ge=1, le=50)
+    include_completed: bool = False
 
 
 class RebuildEmbeddingsRequest(BaseModel):

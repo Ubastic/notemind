@@ -3,8 +3,13 @@ import { useSearchParams } from "react-router-dom";
 
 import { apiFetch } from "../api";
 import NoteCard from "../components/NoteCard";
+import { useLanguage } from "../context/LanguageContext";
+import { useSettings } from "../context/SettingsContext";
 
 export default function Search() {
+  const { t } = useLanguage();
+  const settings = useSettings();
+  const showCompleted = settings?.showCompleted ?? false;
   const [searchParams] = useSearchParams();
   const query = searchParams.get("q") || "";
   const [notes, setNotes] = useState([]);
@@ -23,17 +28,17 @@ export default function Search() {
       try {
         const data = await apiFetch("/notes/search", {
           method: "POST",
-          body: { query, limit: 50 },
+          body: { query, limit: 50, include_completed: showCompleted },
         });
         setNotes(data.items);
       } catch (err) {
-        setError(err.message || "Search failed");
+        setError(err.message || t("errors.searchFailed"));
       } finally {
         setLoading(false);
       }
     };
     loadNotes();
-  }, [query]);
+  }, [query, showCompleted]);
 
   const handleDelete = async (noteId) => {
     setError("");
@@ -41,7 +46,7 @@ export default function Search() {
       await apiFetch(`/notes/${noteId}`, { method: "DELETE" });
       setNotes((prev) => prev.filter((note) => note.id !== noteId));
     } catch (err) {
-      setError(err.message || "Delete failed");
+      setError(err.message || t("errors.deleteFailed"));
     }
   };
 
@@ -49,16 +54,16 @@ export default function Search() {
     <div className="page">
       <div className="page-header">
         <div>
-          <div className="page-title">Search</div>
-          <div className="page-subtitle">Results for "{query}"</div>
+          <div className="page-title">{t("search.title")}</div>
+          <div className="page-subtitle">{t("search.results", { query })}</div>
         </div>
       </div>
 
       {error ? <div className="error">{error}</div> : null}
       {loading ? (
-        <div className="empty-state">Searching...</div>
+        <div className="empty-state">{t("search.loading")}</div>
       ) : notes.length === 0 ? (
-        <div className="empty-state">No results found.</div>
+        <div className="empty-state">{t("search.empty")}</div>
       ) : (
         <div className="note-grid">
           {notes.map((note, index) => (

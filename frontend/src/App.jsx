@@ -2,6 +2,8 @@ import { Navigate, Route, Routes } from "react-router-dom";
 
 import Layout from "./components/Layout";
 import { useAuth } from "./context/AuthContext";
+import { useLanguage } from "./context/LanguageContext";
+import Attachments from "./pages/Attachments";
 import Category from "./pages/Category";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
@@ -11,21 +13,23 @@ import Register from "./pages/Register";
 import Search from "./pages/Search";
 import Settings from "./pages/Settings";
 import ShareView from "./pages/ShareView";
+import Tags from "./pages/Tags";
 
 function RequireAuth({ children }) {
-  const { token, loading } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
+  const { t } = useLanguage();
   if (loading) {
-    return <div className="page">Loading...</div>;
+    return <div className="page">{t("common.loading")}</div>;
   }
-  if (!token) {
+  if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
   return children;
 }
 
 function PublicOnly({ children }) {
-  const { token } = useAuth();
-  if (token) {
+  const { isAuthenticated } = useAuth();
+  if (isAuthenticated) {
     return <Navigate to="/" replace />;
   }
   return children;
@@ -62,6 +66,8 @@ export default function App() {
         <Route index element={<Home />} />
         <Route path="note/:id" element={<NoteDetail />} />
         <Route path="category/:type" element={<Category />} />
+        <Route path="tags" element={<Tags />} />
+        <Route path="attachments" element={<Attachments />} />
         <Route path="search" element={<Search />} />
         <Route path="random" element={<Random />} />
         <Route path="settings" element={<Settings />} />

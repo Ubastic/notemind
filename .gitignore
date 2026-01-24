@@ -1,5 +1,6 @@
 # Node / frontend
 node_modules/
+vite.config.js.timestamp*
 dist/
 build/
 .vite/
@@ -33,6 +34,9 @@ env/
 *.db
 *.sqlite
 *.sqlite3
+
+# Uploads
+uploads/
 
 # Logs
 *.log

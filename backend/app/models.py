@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -15,6 +15,9 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     notes = relationship("Note", back_populates="user", cascade="all, delete-orphan")
+    attachments = relationship(
+        "Attachment", back_populates="user", cascade="all, delete-orphan"
+    )
     settings = relationship(
         "UserSettings",
         back_populates="user",
@@ -43,6 +46,8 @@ class Note(Base):
     content = Column(Text, nullable=False)
     content_encrypted = Column(Boolean, default=True)
 
+    completed = Column(Boolean, default=False)
+
     title = Column(String)
     short_title = Column(String)
     ai_category = Column(String)
@@ -57,6 +62,32 @@ class Note(Base):
 
     user = relationship("User", back_populates="notes")
     shares = relationship("Share", back_populates="note", cascade="all, delete-orphan")
+    attachments = relationship(
+        "Attachment", back_populates="note", cascade="all, delete-orphan"
+    )
+    note_attachments = relationship(
+        "NoteAttachment", back_populates="note", cascade="all, delete-orphan"
+    )
+
+
+class NoteAttachment(Base):
+    __tablename__ = "note_attachments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    note_id = Column(Integer, ForeignKey("notes.id"), nullable=False, index=True)
+    attachment_id = Column(Integer, ForeignKey("attachments.id"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "note_id",
+            "attachment_id",
+            name="uq_note_attachments_note_attachment",
+        ),
+    )
+
+    note = relationship("Note", back_populates="note_attachments")
+    attachment = relationship("Attachment", back_populates="note_attachments")
 
 
 class Share(Base):
@@ -70,3 +101,22 @@ class Share(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     note = relationship("Note", back_populates="shares")
+
+
+class Attachment(Base):
+    __tablename__ = "attachments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    note_id = Column(Integer, ForeignKey("notes.id"))
+    filename = Column(String, nullable=False)
+    stored_name = Column(String, nullable=False)
+    mime_type = Column(String)
+    size = Column(Integer)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User", back_populates="attachments")
+    note = relationship("Note", back_populates="attachments")
+    note_attachments = relationship(
+        "NoteAttachment", back_populates="attachment", cascade="all, delete-orphan"
+    )

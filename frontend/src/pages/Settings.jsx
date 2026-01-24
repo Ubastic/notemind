@@ -2,15 +2,21 @@ import { useEffect, useState } from "react";
 
 import { apiFetch } from "../api";
 import { useAuth } from "../context/AuthContext";
+import { useLanguage } from "../context/LanguageContext";
 import { useSettings } from "../context/SettingsContext";
 
 export default function Settings() {
   const { user } = useAuth();
+  const { t } = useLanguage();
   const settings = useSettings();
   const categories = settings?.categories || [];
   const defaultCategories = settings?.defaultCategories || [];
+  const aiEnabled = settings?.aiEnabled ?? false;
+  const showCompleted = settings?.showCompleted ?? false;
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
+  const [aiSaving, setAiSaving] = useState(false);
+  const [aiError, setAiError] = useState("");
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildError, setRebuildError] = useState("");
   const [rebuildResult, setRebuildResult] = useState(null);
@@ -26,11 +32,38 @@ export default function Settings() {
     setCategoryDraft(categories.map((category) => ({ ...category })));
   }, [categories]);
 
+  useEffect(() => {
+    if (!aiEnabled) {
+      setReanalyze(false);
+    }
+  }, [aiEnabled]);
+
+  const handleAiToggle = async (event) => {
+    const nextEnabled = event.target.checked;
+    setAiError("");
+    if (!settings?.saveAiEnabled) {
+      setAiError(t("errors.settingsUnavailable"));
+      return;
+    }
+    setAiSaving(true);
+    const result = await settings.saveAiEnabled(nextEnabled);
+    if (!result.ok) {
+      setAiError(result.error);
+    }
+    setAiSaving(false);
+  };
+
   const handleExport = async () => {
     setExporting(true);
     setError("");
     try {
-      const data = await apiFetch("/notes?page=1&page_size=100&include_content=true");
+      const params = new URLSearchParams({
+        page: "1",
+        page_size: "100",
+        include_content: "true",
+        include_completed: showCompleted ? "true" : "false",
+      });
+      const data = await apiFetch(`/notes?${params.toString()}`);
       const blob = new Blob([JSON.stringify(data.items, null, 2)], {
         type: "application/json",
       });
@@ -43,7 +76,7 @@ export default function Settings() {
       link.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setError(err.message || "Export failed");
+      setError(err.message || t("errors.exportFailed"));
     } finally {
       setExporting(false);
     }
@@ -74,7 +107,7 @@ export default function Settings() {
         cursor = data.next_cursor;
       }
     } catch (err) {
-      setRebuildError(err.message || "Rebuild failed");
+      setRebuildError(err.message || t("errors.rebuildFailed"));
     } finally {
       setRebuilding(false);
     }
@@ -115,12 +148,12 @@ export default function Settings() {
     const normalized = [];
     trimmed.forEach((item) => {
       if (!item.key) {
-        errors.push("Every category needs a key or remove empty rows.");
+        errors.push(t("errors.categoryKeyRequired"));
         return;
       }
       const key = item.key.toLowerCase();
       if (seen.has(key)) {
-        errors.push(`Duplicate key: ${key}.`);
+        errors.push(t("errors.duplicateKey", { key }));
         return;
       }
       const label = item.label || item.key;
@@ -139,14 +172,14 @@ export default function Settings() {
       return;
     }
     if (!settings?.saveCategories) {
-      setCategoryError("Settings are not available yet.");
+      setCategoryError(t("errors.settingsUnavailable"));
       return;
     }
     setCategorySaving(true);
     const result = await settings.saveCategories(payload.categories);
     if (result.ok) {
       setCategoryDraft(result.categories.map((category) => ({ ...category })));
-      setCategoryNotice("Categories saved.");
+      setCategoryNotice(t("errors.categoriesSaved"));
     } else {
       setCategoryError(result.error);
     }
@@ -157,8 +190,8 @@ export default function Settings() {
     <div className="page">
       <div className="page-header">
         <div>
-          <div className="page-title">Settings</div>
-          <div className="page-subtitle">Manage data exports and preferences.</div>
+          <div className="page-title">{t("settings.title")}</div>
+          <div className="page-subtitle">{t("settings.subtitle")}</div>
         </div>
       </div>
 
@@ -166,32 +199,49 @@ export default function Settings() {
 
       <div className="card">
         <div className="card-header">
-          <div className="card-title">Profile</div>
+          <div className="card-title">{t("settings.profile")}</div>
         </div>
         <div className="section">
-          <div className="muted">Username</div>
+          <div className="muted">{t("settings.username")}</div>
           <div>{user?.username}</div>
         </div>
       </div>
 
       <div className="card">
         <div className="card-header">
-          <div className="card-title">Data export</div>
+          <div className="card-title">{t("settings.dataExport")}</div>
         </div>
         <p className="muted">
-          Download a JSON file with your decrypted notes and metadata.
+          {t("settings.dataExportDesc")}
         </p>
         <button className="btn btn-outline" type="button" onClick={handleExport} disabled={exporting}>
-          {exporting ? "Exporting..." : "Export JSON"}
+          {exporting ? t("settings.exporting") : t("settings.exportButton")}
         </button>
       </div>
 
       <div className="card">
         <div className="card-header">
-          <div className="card-title">Categories</div>
+          <div className="card-title">{t("settings.aiFeatures")}</div>
+        </div>
+        <p className="muted">{t("settings.aiDesc")}</p>
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={aiEnabled}
+            onChange={handleAiToggle}
+            disabled={aiSaving}
+          />
+          {t("settings.aiToggle")}
+        </label>
+        {aiError ? <div className="error">{aiError}</div> : null}
+      </div>
+
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">{t("settings.categories")}</div>
           <div className="btn-row">
             <button className="btn btn-ghost" type="button" onClick={handleResetCategories}>
-              Reset defaults
+              {t("settings.resetDefaults")}
             </button>
             <button
               className="btn"
@@ -199,25 +249,25 @@ export default function Settings() {
               onClick={handleSaveCategories}
               disabled={categorySaving}
             >
-              {categorySaving ? "Saving..." : "Save categories"}
+              {categorySaving ? t("common.saving") : t("settings.saveCategories")}
             </button>
           </div>
         </div>
         <p className="muted">
-          Customize the category tabs and AI classification. Leave empty to use the defaults.
+          {t("settings.categoriesDesc")}
         </p>
         <div className="category-list">
           {categoryDraft.map((category, index) => (
             <div className="category-row" key={`${category.key}-${index}`}>
               <input
                 type="text"
-                placeholder="Label"
+                placeholder={t("settings.categoryLabel")}
                 value={category.label}
                 onChange={(event) => handleCategoryChange(index, "label", event.target.value)}
               />
               <input
                 type="text"
-                placeholder="Key (used in URL and AI)"
+                placeholder={t("settings.categoryKey")}
                 value={category.key}
                 onChange={(event) => handleCategoryChange(index, "key", event.target.value)}
               />
@@ -226,14 +276,14 @@ export default function Settings() {
                 type="button"
                 onClick={() => handleRemoveCategory(index)}
               >
-                Remove
+                {t("settings.remove")}
               </button>
             </div>
           ))}
         </div>
         <div className="btn-row">
           <button className="btn btn-outline" type="button" onClick={handleAddCategory}>
-            Add category
+            {t("settings.addCategory")}
           </button>
         </div>
         {settings?.error ? <div className="error">{settings.error}</div> : null}
@@ -243,10 +293,10 @@ export default function Settings() {
 
       <div className="card">
         <div className="card-header">
-          <div className="card-title">Semantic search index</div>
+          <div className="card-title">{t("settings.searchIndex")}</div>
         </div>
         <p className="muted">
-          Rebuild embeddings so semantic search can find older notes.
+          {t("settings.searchIndexDesc")}
         </p>
         <div className="section">
           <label className="checkbox-row">
@@ -254,16 +304,29 @@ export default function Settings() {
               type="checkbox"
               checked={reanalyze}
               onChange={(event) => setReanalyze(event.target.checked)}
+              disabled={!aiEnabled || rebuilding}
             />
-            Reanalyze notes (slower, uses LLM)
+            {t("settings.reanalyze")}
           </label>
-          <button className="btn" type="button" onClick={handleRebuild} disabled={rebuilding}>
-            {rebuilding ? "Rebuilding..." : "Rebuild embeddings"}
+          <button
+            className="btn"
+            type="button"
+            onClick={handleRebuild}
+            disabled={!aiEnabled || rebuilding}
+          >
+            {rebuilding ? t("settings.rebuilding") : t("settings.rebuild")}
           </button>
+          {!aiEnabled ? (
+            <div className="muted">{t("settings.aiDisabled")}</div>
+          ) : null}
           {rebuildError ? <div className="error">{rebuildError}</div> : null}
           {rebuildResult ? (
             <div className="muted">
-              Updated {rebuildResult.updated} / {rebuildResult.total} notes. Failed: {rebuildResult.failed}.
+              {t("settings.rebuildResult", {
+                updated: rebuildResult.updated,
+                total: rebuildResult.total,
+                failed: rebuildResult.failed,
+              })}
             </div>
           ) : null}
         </div>
