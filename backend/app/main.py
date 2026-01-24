@@ -43,7 +43,16 @@ DEFAULT_CATEGORIES = [
     {"key": "todo", "label": "Todo"},
 ]
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-UPLOAD_DIR = os.path.abspath(os.getenv("UPLOAD_DIR", os.path.join(BASE_DIR, "uploads")))
+
+# Determine storage directory for persistent uploads
+if getattr(sys, "frozen", False):
+    # In PyInstaller bundle, use the executable directory for persistence
+    _STORAGE_ROOT = os.path.dirname(sys.executable)
+else:
+    # In development, use the backend directory
+    _STORAGE_ROOT = BASE_DIR
+
+UPLOAD_DIR = os.path.abspath(os.getenv("UPLOAD_DIR", os.path.join(_STORAGE_ROOT, "storage")))
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "20"))
 AUTH_COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "access_token")
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").strip().lower() in ("1", "true", "yes", "on")
@@ -1206,16 +1215,7 @@ def upload_attachment(
     token = secrets.token_urlsafe(16)
     stored_name = f"{token}{ext}"
 
-    def get_storage_dir():
-        if getattr(sys, 'frozen', False):
-            # In PyInstaller bundle, we want persistence, so use the executable directory
-            return os.path.join(os.path.dirname(sys.executable), "storage")
-        # In development: backend/../storage
-        return os.path.join(BASE_DIR, "..", "storage")
-
-    storage_dir = get_storage_dir()
-
-    user_dir = os.path.join(storage_dir, f"user_{current_user.id}")
+    user_dir = os.path.join(UPLOAD_DIR, f"user_{current_user.id}")
     os.makedirs(user_dir, exist_ok=True)
     stored_path = os.path.join(user_dir, stored_name)
     try:
@@ -1859,3 +1859,51 @@ def ai_summarize(
     contents = [crypto.decrypt_content(note.content, key) for note in notes]
     summary = ai.summarize_notes(contents, payload.days, use_ai=use_ai)
     return schemas.AISummaryResponse(summary=summary)
+
+
+# Serve static files (Frontend)
+def _mount_frontend():
+    if getattr(sys, "frozen", False):
+        # PyInstaller: frontend/dist is bundled in _MEIPASS
+        static_dir = os.path.join(sys._MEIPASS, "frontend", "dist")
+    else:
+        # Development: ../frontend/dist
+        static_dir = os.path.join(BASE_DIR, "..", "frontend", "dist")
+
+    if not os.path.exists(static_dir):
+        logger.warning("Frontend static directory not found at: %s", static_dir)
+        return
+
+    # Mount /assets specifically for efficiency
+    assets_dir = os.path.join(static_dir, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    # Root route to serve index.html
+    @app.get("/")
+    async def serve_root():
+        index_path = os.path.join(static_dir, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        return Response("Frontend not found. Please ensure frontend/dist is built.", status_code=404)
+
+    # Catch-all route for SPA
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        # Skip API routes (handled above)
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404)
+
+        # Try to serve file directly (favicon.ico, etc.)
+        file_path = os.path.join(static_dir, full_path)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return FileResponse(file_path)
+
+        # Fallback to index.html
+        index_path = os.path.join(static_dir, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        
+        raise HTTPException(status_code=404, detail="Frontend not found")
+
+_mount_frontend()
