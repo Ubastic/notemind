@@ -61,3 +61,7 @@ desktop.ini
 
 # Local history / temp
 .history/
+
+# Deploy scripts (sensitive)
+deploy/*.ps1
+!deploy/*.example.ps1
