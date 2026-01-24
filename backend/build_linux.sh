@@ -72,7 +72,8 @@ fi
 
 # 4. Build Backend Executable
 echo "Building Backend Executable..."
-pyinstaller notemind.spec --clean --noconfirm
+# Use python -m PyInstaller to ensure we use the venv version
+python -m PyInstaller notemind.spec --clean --noconfirm
 
 echo "Build Complete!"
 echo "The executable is located at: dist/notemind-server"

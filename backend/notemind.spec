@@ -16,7 +16,7 @@ a = Analysis(
         ('app', 'app'),
         ('../frontend/dist', 'frontend/dist'),  # Embed frontend if built
         ('.env.example', '.'),
-    ] + copy_metadata('sqlalchemy') + copy_metadata('tqdm') + copy_metadata('regex') + copy_metadata('requests'),
+    ] + copy_metadata('sqlalchemy') + copy_metadata('requests'),
     hiddenimports=[
         'uvicorn.logging',
         'uvicorn.loops',
