@@ -4,18 +4,38 @@
 # Run this on a Linux machine (or WSL) to generate the single-file executable
 
 # 1. Setup Python Environment
-if ! command -v python3 &> /dev/null; then
-    echo "Python3 could not be found. Please install it."
-    exit 1
+# You can change this to your specific python executable, e.g., /usr/bin/python3.7
+PYTHON_BIN=${PYTHON_BIN:-python3}
+
+if ! command -v "$PYTHON_BIN" &> /dev/null; then
+    # Fallback to explicit python3.7 if python3 not found, or user specified path
+    if command -v /usr/bin/python3.7 &> /dev/null; then
+        PYTHON_BIN="/usr/bin/python3.7"
+    else
+        echo "Python executable '$PYTHON_BIN' not found. Please install Python 3.7+."
+        exit 1
+    fi
 fi
 
+echo "Using Python: $PYTHON_BIN"
+
 if [ ! -d "venv" ]; then
-    python3 -m venv venv
+    echo "Creating virtual environment..."
+    "$PYTHON_BIN" -m venv venv
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to create virtual environment."
+        echo "On Debian/Ubuntu/Kylin with Python 3.7, you likely need to install the venv module:"
+        echo "  apt-get install python3.7-venv"
+        echo "Or for generic python3:"
+        echo "  apt-get install python3-venv"
+        exit 1
+    fi
 fi
 
 source venv/bin/activate
 
 # 2. Install Dependencies
+echo "Installing dependencies..."
 pip install -r requirements.txt
 
 # 3. Build Frontend (requires Node.js)
