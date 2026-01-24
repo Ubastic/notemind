@@ -10,3 +10,5 @@ cryptography==39.0.2
 requests==2.31.0
 dashscope==1.16.0
 pytz==2023.3
+aiofiles==23.2.1
+pyinstaller==6.3.0

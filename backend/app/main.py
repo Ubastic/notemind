@@ -11,6 +11,7 @@ from .time_utils import ensure_beijing_tz, now_beijing
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, inspect, or_, text
 from sqlalchemy.orm import Session, defer
 
@@ -1203,7 +1204,17 @@ def upload_attachment(
         ext = ext[:10]
     token = secrets.token_urlsafe(16)
     stored_name = f"{token}{ext}"
-    user_dir = os.path.join(UPLOAD_DIR, f"user_{current_user.id}")
+
+    def get_storage_dir():
+        if getattr(sys, 'frozen', False):
+            # In PyInstaller bundle, we want persistence, so use the executable directory
+            return os.path.join(os.path.dirname(sys.executable), "storage")
+        # In development: backend/../storage
+        return os.path.join(BASE_DIR, "..", "storage")
+
+    storage_dir = get_storage_dir()
+
+    user_dir = os.path.join(storage_dir, f"user_{current_user.id}")
     os.makedirs(user_dir, exist_ok=True)
     stored_path = os.path.join(user_dir, stored_name)
     try:
@@ -1806,11 +1817,8 @@ def ai_ask(
     current_user: models.User = Depends(get_current_user),
 ):
     use_ai = _is_ai_enabled_for_user(current_user)
-    if not use_ai:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="AI is disabled; enable it to ask questions.",
-        )
+    # Allow non-AI fallback
+    
     query = payload.query.lower()
     notes = (
         db.query(models.Note)
@@ -1837,11 +1845,8 @@ def ai_summarize(
     current_user: models.User = Depends(get_current_user),
 ):
     use_ai = _is_ai_enabled_for_user(current_user)
-    if not use_ai:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="AI is disabled; enable it to summarize notes.",
-        )
+    # Allow non-AI fallback
+
     cutoff = now_beijing() - timedelta(days=payload.days)
     notes = (
         db.query(models.Note)
