@@ -19,6 +19,12 @@ fi
 
 echo "Using Python: $PYTHON_BIN"
 
+# Check if venv directory exists but is broken (missing activate script)
+if [ -d "venv" ] && [ ! -f "venv/bin/activate" ]; then
+    echo "Found broken venv directory (missing bin/activate). removing..."
+    rm -rf venv
+fi
+
 if [ ! -d "venv" ]; then
     echo "Creating virtual environment..."
     # Try standard venv first
@@ -67,7 +73,7 @@ if [ -d "../frontend" ]; then
         cd ../backend
     else
         echo "Frontend dist exists, skipping build."
-    fi
+"$PYTHON_BIN"
 fi
 
 # 4. Build Backend Executable
