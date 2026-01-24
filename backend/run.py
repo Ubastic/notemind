@@ -1,6 +1,7 @@
 import uvicorn
 import os
 import sys
+import app.main  # Explicit import for PyInstaller analysis
 
 if __name__ == "__main__":
     # Freeze support for multiprocessing in PyInstaller
@@ -13,4 +14,5 @@ if __name__ == "__main__":
     
     # Run the app
     # reload=False is important for frozen app
-    uvicorn.run("app.main:app", host=host, port=port, reload=False, workers=1)
+    # Pass the app object directly instead of string to ensure it's loaded
+    uvicorn.run(app.main.app, host=host, port=port, reload=False, workers=1)
