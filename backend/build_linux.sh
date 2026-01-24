@@ -96,7 +96,18 @@ fi
 # 4. Build Backend Executable
 echo "Building Backend Executable..."
 # Use venv python explicitly to invoke PyInstaller
-"$VENV_PYTHON" -m PyInstaller notemind.spec --clean --noconfirm
+if ! "$VENV_PYTHON" -m PyInstaller notemind.spec --clean --noconfirm; then
+    echo "----------------------------------------------------------------"
+    echo "BUILD FAILED"
+    echo "----------------------------------------------------------------"
+    echo "If you saw 'OSError: Python library not found: libpython3.7.so',"
+    echo "it means you are missing the Python development headers."
+    echo ""
+    echo "Please run the following command to install them:"
+    echo "  sudo apt-get install python3.7-dev"
+    echo "----------------------------------------------------------------"
+    exit 1
+fi
 
 echo "Build Complete!"
 echo "The executable is located at: dist/notemind-server"

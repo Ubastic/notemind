@@ -258,7 +258,7 @@ export default function Settings() {
         </p>
         <div className="category-list">
           {categoryDraft.map((category, index) => (
-            <div className="category-row" key={`${category.key}-${index}`}>
+            <div className="category-row" key={index}>
               <input
                 type="text"
                 placeholder={t("settings.categoryLabel")}
