@@ -29,7 +29,6 @@ hidden_imports += [
     'email',
     'email.message',
     'email.mime',
-    'python_multipart',
     'bcrypt',
     'pytz',
     'aiofiles',
@@ -41,7 +40,7 @@ hidden_imports += [
     'urllib3',
     'sqlite3',
     'distutils',
-    'python-dotenv',
+    'dotenv',
     'importlib_metadata',
     'typing_extensions',
 ]
