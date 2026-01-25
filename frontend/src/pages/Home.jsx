@@ -660,6 +660,43 @@ export default function Home() {
     }
   };
 
+  const handleToggleComplete = async (note) => {
+    if (!note) return;
+    setError("");
+    try {
+      const nextCompleted = !note.completed;
+      const data = await apiFetch(`/notes/${note.id}`, {
+        method: "PUT",
+        body: {
+          completed: nextCompleted,
+          reanalyze: false,
+        },
+      });
+      setMonthNotes((prev) => {
+        const next = { ...prev };
+        Object.keys(next).forEach((monthKey) => {
+          const entry = next[monthKey];
+          if (!entry?.items?.length) return;
+          let changed = false;
+          const updatedItems = entry.items.map((item) => {
+            if (item.id !== data.id) return item;
+            changed = true;
+            return { ...item, ...data };
+          });
+          if (changed) {
+            next[monthKey] = {
+              ...entry,
+              items: updatedItems,
+            };
+          }
+        });
+        return next;
+      });
+    } catch (err) {
+      setError(err.message || t("errors.updateFailed"));
+    }
+  };
+
   const handleCaptureKeyDown = (event) => {
     if (event.ctrlKey && event.key === "Enter") {
       event.preventDefault();
@@ -1159,6 +1196,7 @@ export default function Home() {
                       onDelete={() => handleDelete(note.id)}
                       enableCategoryEdit
                       onUpdateCategory={handleUpdateCategory}
+                      onToggleComplete={handleToggleComplete}
                       isMobile={isMobile}
                     />
                   ))}

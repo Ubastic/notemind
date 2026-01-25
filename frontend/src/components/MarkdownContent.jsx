@@ -1,6 +1,9 @@
 import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import MermaidDiagram from "./MermaidDiagram";
 
 const appendAttachmentAuth = (url, shareToken) => {
   if (!url || !url.includes("/api/attachments/")) return url;
@@ -22,6 +25,33 @@ export default function MarkdownContent({ content, onToggleTask, attachmentToken
       className="note-content"
       remarkPlugins={[remarkGfm, remarkBreaks]}
       components={{
+        code({ node, inline, className, children, ...props }) {
+          const match = /language-(\w+)/.exec(className || "");
+          const language = match ? match[1] : "";
+          
+          if (!inline && language === "mermaid") {
+            return <MermaidDiagram chart={String(children).replace(/\n$/, "")} />;
+          }
+
+          if (!inline) {
+            return (
+              <SyntaxHighlighter
+                style={oneDark}
+                language={language || "text"}
+                PreTag="div"
+                {...props}
+              >
+                {String(children).replace(/\n$/, "")}
+              </SyntaxHighlighter>
+            );
+          }
+          
+          return (
+            <code className={className} {...props}>
+              {children}
+            </code>
+          );
+        },
         img: ({ src, alt, ...props }) => (
           <img
             src={appendAttachmentAuth(src, attachmentToken)}

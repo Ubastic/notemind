@@ -268,6 +268,26 @@ export default function NoteDetail() {
     }
   };
 
+  const handleToggleRelatedComplete = async (relatedNote) => {
+    if (!relatedNote) return;
+    setRelatedError("");
+    try {
+      const nextCompleted = !relatedNote.completed;
+      const data = await apiFetch(`/notes/${relatedNote.id}`, {
+        method: "PUT",
+        body: {
+          completed: nextCompleted,
+          reanalyze: false,
+        },
+      });
+      setRelatedNotes((prev) =>
+        prev.map((item) => (item.id === data.id ? { ...item, ...data } : item))
+      );
+    } catch (err) {
+      setRelatedError(err.message || t("errors.updateFailed"));
+    }
+  };
+
   const handleDelete = async () => {
     const confirmed = window.confirm(t("note.deleteConfirm"));
     if (!confirmed) return;
@@ -804,7 +824,7 @@ export default function NoteDetail() {
         ) : (
           <div className="note-grid">
             {relatedNotes.map((relatedNote, index) => (
-              <NoteCard key={relatedNote.id} note={relatedNote} index={index} />
+              <NoteCard key={relatedNote.id} note={relatedNote} index={index} onToggleComplete={handleToggleRelatedComplete} />
             ))}
           </div>
         )}

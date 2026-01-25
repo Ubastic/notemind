@@ -453,6 +453,26 @@ export default function Category() {
     setQuery("");
   };
 
+  const handleToggleComplete = async (note) => {
+    if (!note) return;
+    setError("");
+    try {
+      const nextCompleted = !note.completed;
+      const data = await apiFetch(`/notes/${note.id}`, {
+        method: "PUT",
+        body: {
+          completed: nextCompleted,
+          reanalyze: false,
+        },
+      });
+      setNotes((prev) =>
+        prev.map((item) => (item.id === data.id ? { ...item, ...data } : item))
+      );
+    } catch (err) {
+      setError(err.message || t("errors.updateFailed"));
+    }
+  };
+
   const handleDelete = async (noteId) => {
     setError("");
     try {
@@ -654,6 +674,8 @@ export default function Category() {
                 note={note}
                 index={index}
                 onDelete={() => handleDelete(note.id)}
+                onToggleComplete={handleToggleComplete}
+                isMobile={isMobile}
               />
             ))}
           </div>

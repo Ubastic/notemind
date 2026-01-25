@@ -50,6 +50,26 @@ export default function Search() {
     }
   };
 
+  const handleToggleComplete = async (note) => {
+    if (!note) return;
+    setError("");
+    try {
+      const nextCompleted = !note.completed;
+      const data = await apiFetch(`/notes/${note.id}`, {
+        method: "PUT",
+        body: {
+          completed: nextCompleted,
+          reanalyze: false,
+        },
+      });
+      setNotes((prev) =>
+        prev.map((item) => (item.id === data.id ? { ...item, ...data } : item))
+      );
+    } catch (err) {
+      setError(err.message || t("errors.updateFailed"));
+    }
+  };
+
   return (
     <div className="page">
       <div className="page-header">
@@ -72,6 +92,7 @@ export default function Search() {
               note={note}
               index={index}
               onDelete={() => handleDelete(note.id)}
+              onToggleComplete={handleToggleComplete}
             />
           ))}
         </div>

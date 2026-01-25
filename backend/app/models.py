@@ -62,9 +62,7 @@ class Note(Base):
 
     user = relationship("User", back_populates="notes")
     shares = relationship("Share", back_populates="note", cascade="all, delete-orphan")
-    attachments = relationship(
-        "Attachment", back_populates="note", cascade="all, delete-orphan"
-    )
+    attachments = relationship("Attachment", back_populates="note")
     note_attachments = relationship(
         "NoteAttachment", back_populates="note", cascade="all, delete-orphan"
     )

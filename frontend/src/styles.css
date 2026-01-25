@@ -1428,6 +1428,33 @@ textarea {
   color: var(--muted);
 }
 
+.note-toggle-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 999px;
+  transition: all 0.2s ease;
+}
+
+.note-toggle-status:hover {
+  background: var(--bg-soft);
+  color: var(--ink);
+}
+
+.note-toggle-status.completed {
+  color: #008060;
+}
+
+.note-toggle-status.completed:hover {
+  background: rgba(0, 128, 96, 0.1);
+}
+
 .category-trigger {
   position: relative;
   display: inline-flex;
@@ -2289,9 +2316,9 @@ textarea {
     min-height: 96px;
   }
 
-  .editor-toolbar {
+  /* .editor-toolbar {
     display: none;
-  }
+  } */
 
   .note-grid {
     grid-template-columns: 1fr;

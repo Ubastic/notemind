@@ -172,6 +172,26 @@ export default function Tags() {
   const activeTagKey = activeTag.trim().toLowerCase();
   const hasMore = notes.length < notesTotal;
 
+  const handleToggleComplete = async (note) => {
+    if (!note) return;
+    setNotesError("");
+    try {
+      const nextCompleted = !note.completed;
+      const data = await apiFetch(`/notes/${note.id}`, {
+        method: "PUT",
+        body: {
+          completed: nextCompleted,
+          reanalyze: false,
+        },
+      });
+      setNotes((prev) =>
+        prev.map((item) => (item.id === data.id ? { ...item, ...data } : item))
+      );
+    } catch (err) {
+      setNotesError(err.message || t("errors.updateFailed"));
+    }
+  };
+
   return (
     <div className="page">
       <div className="page-header">
@@ -257,7 +277,7 @@ export default function Tags() {
             <>
               <div className="note-grid">
                 {notes.map((note, index) => (
-                  <NoteCard key={note.id} note={note} index={index} />
+                  <NoteCard key={note.id} note={note} index={index} onToggleComplete={handleToggleComplete} />
                 ))}
               </div>
               {hasMore ? (

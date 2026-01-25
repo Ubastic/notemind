@@ -17,7 +17,7 @@ from sqlalchemy import func, inspect, or_, text
 from sqlalchemy.orm import Session, defer
 
 from . import ai, crypto, models, schemas, security
-from .database import SessionLocal, engine
+from .database import DATABASE_URL, SessionLocal, engine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -59,6 +59,19 @@ COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").strip().lower() in ("1", "tr
 
 models.Base.metadata.create_all(bind=engine)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# SQLite performance optimizations
+if DATABASE_URL.startswith("sqlite"):
+    with engine.begin() as connection:
+        connection.execute(text("PRAGMA journal_mode=WAL"))
+        connection.execute(text("PRAGMA synchronous=NORMAL"))
+        connection.execute(text("PRAGMA cache_size=-64000"))
+        connection.execute(text("PRAGMA temp_store=MEMORY"))
+        connection.execute(text("PRAGMA mmap_size=268435456"))  # 256MB memory-mapped I/O
+        connection.execute(text("PRAGMA wal_autocheckpoint=1000"))  # Checkpoint every 1000 pages
+        connection.execute(text("PRAGMA busy_timeout=5000"))  # 5 second timeout for locks
+        # Update query planner statistics
+        connection.execute(text("ANALYZE"))
 
 
 def _ensure_notes_title_column() -> None:
@@ -119,9 +132,34 @@ def _ensure_notes_indexes() -> None:
                 "ON notes(user_id, ai_category, created_at)"
             )
         )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_notes_user_completed_created_at "
+                "ON notes(user_id, completed, created_at)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_notes_completed "
+                "ON notes(completed) WHERE completed IS NOT NULL AND completed = 1"
+            )
+        )
 
 
 _ensure_notes_indexes()
+
+# Periodic ANALYZE for query planner optimization
+if DATABASE_URL.startswith("sqlite"):
+    try:
+        with engine.begin() as connection:
+            # Check if we need to run ANALYZE (check sqlite_stat1 table age)
+            result = connection.execute(text(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='sqlite_stat1'"
+            )).scalar()
+            if result == 0:
+                connection.execute(text("ANALYZE"))
+    except Exception as e:
+        logger.warning(f"Failed to run ANALYZE: {e}")
 
 app = FastAPI(title="NoteMind API", version="0.1.0")
 
@@ -1085,7 +1123,6 @@ def list_notes(
         )
         return schemas.NoteListOut(items=items, total=total, page=page, page_size=page_size)
     query = _apply_time_filter(query, time_start, time_end)
-    total = query.count()
     notes_query = query.options(defer(models.Note.embedding))
     if not include_content:
         notes_query = notes_query.options(
@@ -1098,6 +1135,8 @@ def list_notes(
         .limit(page_size)
         .all()
     )
+    # Use func.count() with specific column for better performance
+    total = query.with_entities(func.count(models.Note.id)).scalar()
     key = (
         crypto.derive_key(current_user.password_hash, current_user.salt)
         if include_content
@@ -1122,17 +1161,19 @@ def notes_timeline(
     if group_clean not in ("month", "day"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid group")
 
-    query = db.query(models.Note).filter(models.Note.user_id == current_user.id)
+    base_filters = [models.Note.user_id == current_user.id]
     if not include_completed:
-        query = query.filter(or_(models.Note.completed.is_(None), models.Note.completed.is_(False)))
+        base_filters.append(or_(models.Note.completed.is_(None), models.Note.completed.is_(False)))
     if category:
-        query = query.filter(models.Note.ai_category == category)
+        base_filters.append(models.Note.ai_category == category)
     if tag:
         cleaned_tag = str(tag or "").strip()
         if cleaned_tag:
-            query = query.filter(
+            base_filters.append(
                 models.Note.ai_tags.ilike(_tag_like_pattern(cleaned_tag), escape="\\")
             )
+    
+    query = db.query(models.Note).filter(*base_filters)
     query = _apply_time_filter(query, time_start, time_end)
 
     if group_clean == "day":
@@ -1556,6 +1597,7 @@ def delete_note(
     )
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
+    
     linked_attachment_ids = [
         row[0]
         for row in (
@@ -1564,31 +1606,24 @@ def delete_note(
             .all()
         )
     ]
-    (
-        db.query(models.NoteAttachment)
-        .filter(models.NoteAttachment.note_id == note.id)
-        .delete(synchronize_session=False)
-    )
-
+    
+    attachments_to_check = []
+    
     attachments = db.query(models.Attachment).filter(models.Attachment.note_id == note.id).all()
     for attachment in attachments:
-        still_linked = (
+        other_links_count = (
             db.query(models.NoteAttachment)
-            .filter(models.NoteAttachment.attachment_id == attachment.id)
+            .filter(
+                models.NoteAttachment.attachment_id == attachment.id,
+                models.NoteAttachment.note_id != note.id
+            )
             .count()
-            > 0
         )
-        if still_linked:
+        if other_links_count > 0:
             attachment.note_id = None
-            continue
-        file_path = os.path.join(UPLOAD_DIR, f"user_{attachment.user_id}", attachment.stored_name)
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except OSError:
-                logger.warning("Failed to remove attachment file: %s", file_path)
-        db.delete(attachment)
-
+        else:
+            attachments_to_check.append(attachment)
+    
     if linked_attachment_ids:
         attachments_linked_only = (
             db.query(models.Attachment)
@@ -1600,23 +1635,32 @@ def delete_note(
             .all()
         )
         for attachment in attachments_linked_only:
-            still_linked = (
+            other_links_count = (
                 db.query(models.NoteAttachment)
-                .filter(models.NoteAttachment.attachment_id == attachment.id)
+                .filter(
+                    models.NoteAttachment.attachment_id == attachment.id,
+                    models.NoteAttachment.note_id != note.id
+                )
                 .count()
-                > 0
             )
-            if still_linked:
-                continue
-            file_path = os.path.join(
-                UPLOAD_DIR, f"user_{attachment.user_id}", attachment.stored_name
-            )
-            if os.path.exists(file_path):
-                try:
-                    os.remove(file_path)
-                except OSError:
-                    logger.warning("Failed to remove attachment file: %s", file_path)
-            db.delete(attachment)
+            if other_links_count == 0:
+                attachments_to_check.append(attachment)
+    
+    (
+        db.query(models.NoteAttachment)
+        .filter(models.NoteAttachment.note_id == note.id)
+        .delete(synchronize_session=False)
+    )
+    
+    for attachment in attachments_to_check:
+        file_path = os.path.join(UPLOAD_DIR, f"user_{attachment.user_id}", attachment.stored_name)
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                logger.warning("Failed to remove attachment file: %s", file_path)
+        db.delete(attachment)
+    
     db.delete(note)
     db.commit()
     return None

@@ -43,6 +43,7 @@ export default function NoteCard({
   previewMode,
   enableCategoryEdit = false,
   onUpdateCategory,
+  onToggleComplete,
   isMobile = false,
 }) {
   const { t, formatCategoryLabel, formatMatchType } = useLanguage();
@@ -125,6 +126,13 @@ export default function NoteCard({
       }
     } finally {
       setCategorySaving(false);
+    }
+  };
+
+  const handleToggle = (event) => {
+    event.stopPropagation();
+    if (onToggleComplete) {
+      onToggleComplete(note);
     }
   };
 
@@ -265,6 +273,31 @@ export default function NoteCard({
         <span>{formatTime(note.created_at)}</span>
         {note.ai_sensitivity === "high" ? (
           <span className="badge">{t("common.sensitive")}</span>
+        ) : null}
+        {onToggleComplete ? (
+          <button
+            className={`note-toggle-status ${isCompleted ? "completed" : ""}`}
+            type="button"
+            onClick={handleToggle}
+            title={isCompleted ? "Mark as in-progress" : "Mark as completed"}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              {isCompleted ? (
+                <polyline points="20 6 9 17 4 12" />
+              ) : (
+                <circle cx="12" cy="12" r="9" />
+              )}
+            </svg>
+          </button>
         ) : null}
       </div>
       {searchInfo ? (

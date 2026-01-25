@@ -44,6 +44,24 @@ export default function Random() {
     }
   };
 
+  const handleToggleComplete = async (noteToUpdate) => {
+    if (!noteToUpdate) return;
+    setError("");
+    try {
+      const nextCompleted = !noteToUpdate.completed;
+      const data = await apiFetch(`/notes/${noteToUpdate.id}`, {
+        method: "PUT",
+        body: {
+          completed: nextCompleted,
+          reanalyze: false,
+        },
+      });
+      setNote((prev) => (prev?.id === data.id ? { ...prev, ...data } : prev));
+    } catch (err) {
+      setError(err.message || t("errors.updateFailed"));
+    }
+  };
+
   return (
     <div className="page">
       <div className="page-header">
@@ -61,7 +79,7 @@ export default function Random() {
         <div className="empty-state">{t("common.loading")}</div>
       ) : note ? (
         <div className="note-grid">
-          <NoteCard note={note} index={0} onDelete={() => handleDelete(note.id)} />
+          <NoteCard note={note} index={0} onDelete={() => handleDelete(note.id)} onToggleComplete={handleToggleComplete} />
         </div>
       ) : (
         <div className="empty-state">{t("common.noNotes")}</div>
