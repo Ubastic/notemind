@@ -23,6 +23,7 @@ export default function NoteDetail() {
   const [shortTitle, setShortTitle] = useState("");
   const [category, setCategory] = useState("");
   const [tags, setTags] = useState("");
+  const [folder, setFolder] = useState("");
   const [shareLink, setShareLink] = useState("");
   const [saving, setSaving] = useState(false);
   const [tagSaving, setTagSaving] = useState(false);
@@ -104,6 +105,7 @@ export default function NoteDetail() {
       setShortTitle(data.short_title || "");
       setCategory(data.ai_category || "");
       setTags((data.ai_tags || []).join(", "));
+      setFolder(data.folder || "");
       return true;
     } catch (err) {
       setError(err.message || t("errors.loadNote"));
@@ -197,6 +199,7 @@ export default function NoteDetail() {
           short_title: shortTitle.trim() || undefined,
           category: category || undefined,
           tags: tagsList,
+          folder: folder.trim() || undefined,
           reanalyze: true,
         },
       });
@@ -205,6 +208,7 @@ export default function NoteDetail() {
       setShortTitle(data.short_title || "");
       setCategory(data.ai_category || "");
       setTags((data.ai_tags || []).join(", "));
+      setFolder(data.folder || "");
       setEditing(false);
       await loadRelated();
     } catch (err) {
@@ -745,6 +749,20 @@ export default function NoteDetail() {
               </select>
             ) : (
               <div>{categoryLabel}</div>
+            )}
+          </div>
+          <div>
+            <div className="meta-label">{t("note.folder")}</div>
+            {editing ? (
+              <input
+                value={folder}
+                onChange={(e) => setFolder(e.target.value)}
+                placeholder={t("note.folderPlaceholder")}
+              />
+            ) : (
+              <div className={note.folder ? "" : "muted"}>
+                {note.folder || t("common.notSet")}
+              </div>
             )}
           </div>
           <div>

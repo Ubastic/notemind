@@ -55,6 +55,7 @@ class Note(Base):
     ai_tags = Column(Text)
     ai_entities = Column(Text)
     ai_sensitivity = Column(String)
+    folder = Column(String)
     embedding = Column(Text)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

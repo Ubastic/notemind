@@ -115,6 +115,20 @@ def _ensure_notes_completed_column() -> None:
 
 _ensure_notes_completed_column()
 
+
+def _ensure_notes_folder_column() -> None:
+    inspector = inspect(engine)
+    if "notes" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("notes")}
+    if "folder" in columns:
+        return
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE notes ADD COLUMN folder VARCHAR"))
+
+
+_ensure_notes_folder_column()
+
 def _ensure_notes_indexes() -> None:
     inspector = inspect(engine)
     if "notes" not in inspector.get_table_names():
@@ -453,6 +467,7 @@ def _note_to_schema(
         content=content,
         completed=bool(getattr(note, "completed", False)),
         ai_category=note.ai_category,
+        folder=getattr(note, "folder", None),
         ai_summary=note.ai_summary,
         ai_tags=tags,
         ai_entities=entities,
@@ -1060,6 +1075,7 @@ def create_note(
         title=title,
         short_title=short_title,
         ai_category=category,
+        folder=payload.folder,
         ai_summary=summary,
         ai_tags=json.dumps(tags),
         ai_entities=json.dumps(entities),
@@ -1083,6 +1099,7 @@ def list_notes(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     category: Optional[str] = None,
+    folder: Optional[str] = None,
     tag: Optional[str] = None,
     q: Optional[str] = None,
     time_start: Optional[str] = None,
@@ -1096,6 +1113,8 @@ def list_notes(
     use_ai = _is_ai_enabled_for_user(current_user)
     if category:
         query = query.filter(models.Note.ai_category == category)
+    if folder:
+        query = query.filter(models.Note.folder == folder)
     if tag:
         cleaned_tag = str(tag or "").strip()
         if cleaned_tag:
@@ -1565,6 +1584,9 @@ def update_note(
         cat_key = str(payload.category).strip().lower()
         if cat_key in allowed_categories:
             note.ai_category = cat_key
+
+    if payload.folder is not None:
+        note.folder = str(payload.folder).strip() or None
 
     if payload.tags is not None:
         note.ai_tags = json.dumps(_normalize_tags(payload.tags))

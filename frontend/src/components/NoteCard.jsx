@@ -270,6 +270,11 @@ export default function NoteCard({
         ) : (
           <span className="badge">{categoryLabel}</span>
         )}
+        {note.folder ? (
+          <span className="badge badge-outline" title={t("common.folder")}>
+            {note.folder}
+          </span>
+        ) : null}
         <span>{formatTime(note.created_at)}</span>
         {note.ai_sensitivity === "high" ? (
           <span className="badge">{t("common.sensitive")}</span>

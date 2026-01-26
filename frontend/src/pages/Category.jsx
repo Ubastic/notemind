@@ -4,6 +4,7 @@ import { useParams } from "react-router-dom";
 import { apiFetch, listNotes, uploadAttachment } from "../api";
 import NoteCard from "../components/NoteCard";
 import TimeFolderTree from "../components/TimeFolderTree";
+import FolderTree from "../components/FolderTree";
 import { useLanguage } from "../context/LanguageContext";
 import { useSettings } from "../context/SettingsContext";
 
@@ -23,6 +24,7 @@ export default function Category() {
   const [error, setError] = useState("");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const [folder, setFolder] = useState("");
   const [draftId, setDraftId] = useState(null);
   const [searchInput, setSearchInput] = useState("");
   const [query, setQuery] = useState("");
@@ -156,6 +158,7 @@ export default function Category() {
     setError("");
     try {
       const trimmedTitle = title.trim();
+      const trimmedFolder = folder.trim();
       const note = await apiFetch(draftId ? `/notes/${draftId}` : "/notes", {
         method: draftId ? "PUT" : "POST",
         body: draftId
@@ -163,15 +166,18 @@ export default function Category() {
               content,
               category: type,
               title: trimmedTitle || undefined,
+              folder: trimmedFolder || undefined,
               reanalyze: true,
             }
           : {
               content,
               category: type,
               title: trimmedTitle || undefined,
+              folder: trimmedFolder || undefined,
             },
       });
       setTitle("");
+      setFolder("");
       setContent("");
       setDraftId(null);
       setNotes((prev) => {
@@ -225,9 +231,11 @@ export default function Category() {
       let noteId = draftId;
       if (!noteId) {
         const trimmedTitle = title.trim();
+        const trimmedFolder = folder.trim();
         const createPayload = {
           content: content.trim() ? content : " ",
           title: trimmedTitle || undefined,
+          folder: trimmedFolder || undefined,
           category: type,
         };
         const note = await apiFetch("/notes", {
@@ -246,12 +254,14 @@ export default function Category() {
         : `[${attachment.filename}](${attachment.url})`;
       const nextContent = insertAtCursor(markdown);
       const trimmedTitle = title.trim();
+      const trimmedFolder = folder.trim();
       await apiFetch(`/notes/${noteId}`, {
         method: "PUT",
         body: {
           content: nextContent,
           reanalyze: false,
           title: trimmedTitle || undefined,
+          folder: trimmedFolder || undefined,
           category: type,
         },
       });
@@ -501,7 +511,14 @@ export default function Category() {
                 type="button"
                 onClick={() => setViewMode("folders")}
               >
-                {t("category.viewFolders")}
+                {t("category.viewTimeFolders")}
+              </button>
+              <button
+                className={`toggle-btn ${viewMode === "structure" ? "active" : ""}`}
+                type="button"
+                onClick={() => setViewMode("structure")}
+              >
+                {t("category.viewStructure")}
               </button>
               <button
                 className={`toggle-btn ${viewMode === "cards" ? "active" : ""}`}
@@ -535,6 +552,19 @@ export default function Category() {
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
               />
+              <input
+                type="text"
+                className="input-sm"
+                placeholder={t("category.folderPlaceholder")}
+                value={folder}
+                onChange={(event) => setFolder(event.target.value)}
+                list="folder-suggestions"
+              />
+              <datalist id="folder-suggestions">
+                {Array.from(new Set(notes.map(n => n.folder).filter(Boolean))).sort().map(f => (
+                  <option key={f} value={f} />
+                ))}
+              </datalist>
               <textarea
                 ref={captureRef}
                 placeholder={t("category.capturePlaceholder", { category: categoryLabel })}
@@ -665,6 +695,8 @@ export default function Category() {
         </div>
       ) : viewMode === "folders" ? (
         <TimeFolderTree notes={notes} />
+      ) : viewMode === "structure" ? (
+        <FolderTree notes={notes} />
       ) : (
         <>
           <div className="note-grid">

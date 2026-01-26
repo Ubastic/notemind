@@ -37,6 +37,7 @@ class NoteCreate(BaseModel):
     content: str = Field(min_length=1)
     category: Optional[str] = None
     title: Optional[str] = Field(default=None, max_length=200)
+    folder: Optional[str] = Field(default=None, max_length=200)
 
 
 class NoteUpdate(BaseModel):
@@ -46,6 +47,7 @@ class NoteUpdate(BaseModel):
     title: Optional[str] = Field(default=None, max_length=200)
     short_title: Optional[str] = Field(default=None, max_length=200)
     category: Optional[str] = None
+    folder: Optional[str] = Field(default=None, max_length=200)
     tags: Optional[List[str]] = None
 
 
@@ -63,6 +65,7 @@ class NoteOut(BaseModel):
     content: str
     completed: bool = False
     ai_category: Optional[str] = None
+    folder: Optional[str] = None
     ai_summary: Optional[str] = None
     ai_tags: List[str] = Field(default_factory=list)
     ai_entities: Dict[str, Any] = Field(default_factory=dict)
