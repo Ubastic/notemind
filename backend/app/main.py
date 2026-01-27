@@ -491,6 +491,9 @@ def _note_to_schema(
         ai_entities=entities,
         ai_sensitivity=note.ai_sensitivity,
         search_info=search_info,
+        pinned_global=bool(getattr(note, "pinned_global", False)),
+        pinned_category=bool(getattr(note, "pinned_category", False)),
+        pinned_at=getattr(note, "pinned_at", None),
         created_at=note.created_at,
         updated_at=note.updated_at,
     )
@@ -1562,9 +1565,21 @@ def update_note(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
 
     if payload.content is None:
-        if payload.completed is None:
+        if (
+            payload.completed is None
+            and payload.pinned_global is None
+            and payload.pinned_category is None
+        ):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing content")
-        note.completed = bool(payload.completed)
+        if payload.completed is not None:
+            note.completed = bool(payload.completed)
+        if payload.pinned_global is not None:
+            note.pinned_global = bool(payload.pinned_global)
+            note.pinned_at = now_beijing() if payload.pinned_global else None
+        if payload.pinned_category is not None:
+            note.pinned_category = bool(payload.pinned_category)
+            if payload.pinned_global is None:
+                note.pinned_at = now_beijing() if payload.pinned_category else None
         note.updated_at = now_beijing()
         db.commit()
         db.refresh(note)
