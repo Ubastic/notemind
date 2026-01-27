@@ -47,7 +47,7 @@ export default function NoteCard({
   onTogglePin,
   isMobile = false,
 }) {
-  const { t, formatCategoryLabel, formatMatchType } = useLanguage();
+  const { t, language, formatCategoryLabel, formatMatchType } = useLanguage();
   const location = useLocation();
   const navigate = useNavigate();
   const settings = useSettings();
@@ -75,6 +75,15 @@ export default function NoteCard({
     typeof searchInfo?.similarity === "number" ? searchInfo.similarity : null;
   const showSimilarity = matchType.includes("semantic") && similarity !== null;
   const matchLabel = formatMatchType(matchType);
+  const resolveLabel = (key, fallback) => {
+    if (typeof t !== "function") return fallback || key;
+    const value = t(key);
+    if (!value || value === key) return fallback || value;
+    return value;
+  };
+  const pinLabel = isPinnedGlobal || isPinnedCategory
+    ? resolveLabel("common.unpin", language === "zh" ? "取消置顶" : "Unpin")
+    : resolveLabel("common.pin", language === "zh" ? "置顶" : "Pin");
   const handleOpen = (event) => {
     if (event.defaultPrevented) return;
     const selection = typeof window !== "undefined" ? window.getSelection?.() : null;
@@ -359,9 +368,9 @@ export default function NoteCard({
             className="btn btn-ghost" 
             type="button" 
             onClick={handlePinToggle}
-            title={isPinnedGlobal || isPinnedCategory ? t("common.unpin") : t("common.pin")}
+            title={pinLabel}
           >
-            {isPinnedGlobal || isPinnedCategory ? t("common.unpin") : t("common.pin")}
+            {pinLabel}
           </button>
         ) : null}
         {onDelete ? (

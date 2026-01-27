@@ -109,8 +109,28 @@ export default function Home() {
     return acc;
   }, [loadedMonths, monthNotes]);
 
+  const pinnedNotes = useMemo(() => {
+    const pinned = flatNotes.filter((note) => Boolean(note?.pinned_global));
+    pinned.sort((a, b) => {
+      const aPinned = a?.pinned_at || a?.created_at || "";
+      const bPinned = b?.pinned_at || b?.created_at || "";
+      if (aPinned === bPinned) {
+        const aCreated = a?.created_at || "";
+        const bCreated = b?.created_at || "";
+        return aCreated < bCreated ? 1 : -1;
+      }
+      return aPinned < bPinned ? 1 : -1;
+    });
+    return pinned;
+  }, [flatNotes]);
+
+  const unpinnedNotes = useMemo(
+    () => flatNotes.filter((note) => !note?.pinned_global),
+    [flatNotes]
+  );
+
   const grouped = useMemo(() => {
-    return flatNotes.reduce((acc, note) => {
+    return unpinnedNotes.reduce((acc, note) => {
       const date = formatDate(note.created_at);
       if (!acc[date]) {
         acc[date] = [];
@@ -118,7 +138,7 @@ export default function Home() {
       acc[date].push(note);
       return acc;
     }, {});
-  }, [flatNotes]);
+  }, [unpinnedNotes]);
 
   const dates = useMemo(() => Object.keys(grouped).sort((a, b) => (a < b ? 1 : -1)), [grouped]);
   const timelineItems = useMemo(() => {
@@ -133,6 +153,8 @@ export default function Home() {
       };
     });
   }, [dates, grouped, monthsShort]);
+  const hasPinned = pinnedNotes.length > 0;
+  const hasUnpinned = dates.length > 0;
 
   const activeIndex = useMemo(
     () => timelineItems.findIndex((item) => item.date === activeDate),
@@ -1205,10 +1227,32 @@ export default function Home() {
 
           {error ? <div className="error">{error}</div> : null}
 
+          {pinnedNotes.length ? (
+            <div className="section pinned-section">
+              <div className="section-title">{t("common.pinned")}</div>
+              <div className="note-grid">
+                {pinnedNotes.map((note, index) => (
+                  <NoteCard
+                    key={note.id}
+                    note={note}
+                    index={index}
+                    previewMode="timeline"
+                    onDelete={() => handleDelete(note.id)}
+                    enableCategoryEdit
+                    onUpdateCategory={handleUpdateCategory}
+                    onToggleComplete={handleToggleComplete}
+                    onTogglePin={handleTogglePin}
+                    isMobile={isMobile}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           {loading ? (
             <div className="empty-state">{t("home.loadingNotes")}</div>
-          ) : dates.length === 0 ? (
-            <div className="empty-state">{t("home.emptyNotes")}</div>
+          ) : !hasUnpinned ? (
+            hasPinned ? null : <div className="empty-state">{t("home.emptyNotes")}</div>
           ) : (
             dates.map((date) => (
               <div
