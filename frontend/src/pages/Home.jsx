@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { apiFetch, getNotesTimeline, listNotes, uploadAttachment } from "../api";
+import { apiFetch, getNotesTimeline, listNotes, uploadAttachment, updateNote } from "../api";
 import NoteCard from "../components/NoteCard";
 import { useLanguage } from "../context/LanguageContext";
 import { useSettings } from "../context/SettingsContext";
@@ -697,6 +697,40 @@ export default function Home() {
     }
   };
 
+  const handleTogglePin = async (note) => {
+    if (!note) return;
+    setError("");
+    try {
+      const nextPinnedGlobal = !note.pinned_global;
+      const data = await updateNote(note.id, {
+        pinned_global: nextPinnedGlobal,
+        reanalyze: false,
+      });
+      setMonthNotes((prev) => {
+        const next = { ...prev };
+        Object.keys(next).forEach((monthKey) => {
+          const entry = next[monthKey];
+          if (!entry?.items?.length) return;
+          let changed = false;
+          const updatedItems = entry.items.map((item) => {
+            if (item.id !== data.id) return item;
+            changed = true;
+            return { ...item, ...data };
+          });
+          if (changed) {
+            next[monthKey] = {
+              ...entry,
+              items: updatedItems,
+            };
+          }
+        });
+        return next;
+      });
+    } catch (err) {
+      setError(err.message || t("errors.updateFailed"));
+    }
+  };
+
   const handleCaptureKeyDown = (event) => {
     if (event.ctrlKey && event.key === "Enter") {
       event.preventDefault();
@@ -1197,6 +1231,7 @@ export default function Home() {
                       enableCategoryEdit
                       onUpdateCategory={handleUpdateCategory}
                       onToggleComplete={handleToggleComplete}
+                      onTogglePin={handleTogglePin}
                       isMobile={isMobile}
                     />
                   ))}

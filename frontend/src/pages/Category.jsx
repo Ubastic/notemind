@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
-import { apiFetch, listNotes, uploadAttachment } from "../api";
+import { apiFetch, listNotes, uploadAttachment, updateNote } from "../api";
 import NoteCard from "../components/NoteCard";
 import TimeFolderTree from "../components/TimeFolderTree";
 import FolderTree from "../components/FolderTree";
@@ -483,6 +483,23 @@ export default function Category() {
     }
   };
 
+  const handleTogglePin = async (note) => {
+    if (!note) return;
+    setError("");
+    try {
+      const nextPinnedCategory = !note.pinned_category;
+      const data = await updateNote(note.id, {
+        pinned_category: nextPinnedCategory,
+        reanalyze: false,
+      });
+      setNotes((prev) =>
+        prev.map((item) => (item.id === data.id ? { ...item, ...data } : item))
+      );
+    } catch (err) {
+      setError(err.message || t("errors.updateFailed"));
+    }
+  };
+
   const handleDelete = async (noteId) => {
     setError("");
     try {
@@ -707,6 +724,7 @@ export default function Category() {
                 index={index}
                 onDelete={() => handleDelete(note.id)}
                 onToggleComplete={handleToggleComplete}
+                onTogglePin={handleTogglePin}
                 isMobile={isMobile}
               />
             ))}

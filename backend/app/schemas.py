@@ -49,6 +49,8 @@ class NoteUpdate(BaseModel):
     category: Optional[str] = None
     folder: Optional[str] = Field(default=None, max_length=200)
     tags: Optional[List[str]] = None
+    pinned_global: Optional[bool] = None
+    pinned_category: Optional[bool] = None
 
 
 class SearchInfo(BaseModel):
@@ -71,6 +73,9 @@ class NoteOut(BaseModel):
     ai_entities: Dict[str, Any] = Field(default_factory=dict)
     ai_sensitivity: Optional[str] = None
     search_info: Optional[SearchInfo] = None
+    pinned_global: bool = False
+    pinned_category: bool = False
+    pinned_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

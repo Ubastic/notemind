@@ -129,6 +129,24 @@ def _ensure_notes_folder_column() -> None:
 
 _ensure_notes_folder_column()
 
+
+def _ensure_notes_pinning_columns() -> None:
+    inspector = inspect(engine)
+    if "notes" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("notes")}
+    
+    with engine.begin() as connection:
+        if "pinned_global" not in columns:
+            connection.execute(text("ALTER TABLE notes ADD COLUMN pinned_global BOOLEAN DEFAULT 0"))
+        if "pinned_category" not in columns:
+            connection.execute(text("ALTER TABLE notes ADD COLUMN pinned_category BOOLEAN DEFAULT 0"))
+        if "pinned_at" not in columns:
+            connection.execute(text("ALTER TABLE notes ADD COLUMN pinned_at DATETIME"))
+
+
+_ensure_notes_pinning_columns()
+
 def _ensure_notes_indexes() -> None:
     inspector = inspect(engine)
     if "notes" not in inspector.get_table_names():
@@ -1148,12 +1166,34 @@ def list_notes(
             defer(models.Note.content),
             defer(models.Note.content_encrypted),
         )
-    notes = (
-        notes_query.order_by(models.Note.created_at.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
-    )
+    # Sort by pin status first, then by creation time
+    # For category-specific requests, show category-pinned notes first
+    # For general requests, show globally-pinned notes first
+    if category:
+        # Category page: category-pinned first, then globally-pinned, then normal notes
+        notes = (
+            notes_query.order_by(
+                models.Note.pinned_category.desc(),
+                models.Note.pinned_global.desc(), 
+                models.Note.pinned_at.desc(),
+                models.Note.created_at.desc()
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+    else:
+        # Home/general page: globally-pinned first, then normal notes
+        notes = (
+            notes_query.order_by(
+                models.Note.pinned_global.desc(),
+                models.Note.pinned_at.desc(),
+                models.Note.created_at.desc()
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
     # Use func.count() with specific column for better performance
     total = query.with_entities(func.count(models.Note.id)).scalar()
     key = (
@@ -1593,6 +1633,15 @@ def update_note(
 
     if payload.completed is not None:
         note.completed = bool(payload.completed)
+    
+    if payload.pinned_global is not None:
+        note.pinned_global = bool(payload.pinned_global)
+        note.pinned_at = now_beijing() if payload.pinned_global else None
+    
+    if payload.pinned_category is not None:
+        note.pinned_category = bool(payload.pinned_category)
+        if payload.pinned_global is None:  # Only update pinned_at if global wasn't also updated
+            note.pinned_at = now_beijing() if payload.pinned_category else None
 
     key = crypto.derive_key(current_user.password_hash, current_user.salt)
     note.content = crypto.encrypt_content(payload.content, key)

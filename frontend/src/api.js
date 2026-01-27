@@ -129,6 +129,13 @@ export async function deleteAttachment(attachmentId) {
   return apiFetch(`/attachments/${attachmentId}`, { method: "DELETE" });
 }
 
+export async function updateNote(noteId, updates) {
+  return apiFetch(`/notes/${noteId}`, {
+    method: "PUT",
+    body: updates,
+  });
+}
+
 export async function uploadAttachment(file, noteId) {
   if (!file) {
     throw new Error("Missing file");

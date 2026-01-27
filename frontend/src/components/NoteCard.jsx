@@ -44,6 +44,7 @@ export default function NoteCard({
   enableCategoryEdit = false,
   onUpdateCategory,
   onToggleComplete,
+  onTogglePin,
   isMobile = false,
 }) {
   const { t, formatCategoryLabel, formatMatchType } = useLanguage();
@@ -55,6 +56,8 @@ export default function NoteCard({
   const [categorySaving, setCategorySaving] = useState(false);
   const categoryRef = useRef(null);
   const isCompleted = Boolean(note.completed);
+  const isPinnedGlobal = Boolean(note.pinned_global);
+  const isPinnedCategory = Boolean(note.pinned_category);
   const fromPath = `${location.pathname}${location.search}`;
   const categoryLabel =
     settings?.categoryLabels?.[note.ai_category] ||
@@ -136,6 +139,13 @@ export default function NoteCard({
     }
   };
 
+  const handlePinToggle = (event) => {
+    event.stopPropagation();
+    if (onTogglePin) {
+      onTogglePin(note);
+    }
+  };
+
   useEffect(() => {
     if (!categoryOpen) return;
     const handleOutside = (event) => {
@@ -164,7 +174,7 @@ export default function NoteCard({
   }, [note.ai_category]);
   return (
     <div
-      className={`note-card ${isCompleted ? "note-card-completed" : ""} ${previewMode === "timeline" ? "note-card-timeline" : ""}`}
+      className={`note-card ${isCompleted ? "note-card-completed" : ""} ${previewMode === "timeline" ? "note-card-timeline" : ""} ${isPinnedGlobal || isPinnedCategory ? "note-card-pinned" : ""}`}
       style={{ animationDelay: `${index * 40}ms` }}
       onClick={handleOpen}
     >
@@ -279,6 +289,13 @@ export default function NoteCard({
         {note.ai_sensitivity === "high" ? (
           <span className="badge">{t("common.sensitive")}</span>
         ) : null}
+        {(isPinnedGlobal || isPinnedCategory) ? (
+          <span className="pin-indicator" title={t("common.pinned")}>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+              <path d="M16 4h1v12l-1 2-1-2V4zM9 4v12l-1 2-1-2V4h2zm7-2H8a1 1 0 0 0-1 1v1h11V3a1 1 0 0 0-1-1z"/>
+            </svg>
+          </span>
+        ) : null}
         {onToggleComplete ? (
           <button
             className={`note-toggle-status ${isCompleted ? "completed" : ""}`}
@@ -337,6 +354,16 @@ export default function NoteCard({
         >
           {t("note.openDetail")}
         </Link>
+        {onTogglePin ? (
+          <button 
+            className="btn btn-ghost" 
+            type="button" 
+            onClick={handlePinToggle}
+            title={isPinnedGlobal || isPinnedCategory ? t("common.unpin") : t("common.pin")}
+          >
+            {isPinnedGlobal || isPinnedCategory ? t("common.unpin") : t("common.pin")}
+          </button>
+        ) : null}
         {onDelete ? (
           <button className="btn btn-ghost" type="button" onClick={handleDelete}>
             {t("common.delete")}

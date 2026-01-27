@@ -58,6 +58,10 @@ class Note(Base):
     folder = Column(String)
     embedding = Column(Text)
 
+    pinned_global = Column(Boolean, default=False)
+    pinned_category = Column(Boolean, default=False)
+    pinned_at = Column(DateTime(timezone=True))
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
