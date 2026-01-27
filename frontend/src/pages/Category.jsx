@@ -28,7 +28,7 @@ export default function Category() {
   const [draftId, setDraftId] = useState(null);
   const [searchInput, setSearchInput] = useState("");
   const [query, setQuery] = useState("");
-  const [viewMode, setViewMode] = useState("folders");
+  const [viewMode, setViewMode] = useState("cards");
   const [isMobile, setIsMobile] = useState(false);
   const [captureOpen, setCaptureOpen] = useState(true);
   const [searchOpen, setSearchOpen] = useState(true);
