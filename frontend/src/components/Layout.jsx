@@ -9,6 +9,47 @@ import { useSettings } from "../context/SettingsContext";
 export default function Layout() {
   const { user, logout } = useAuth();
   const { t } = useLanguage();
+
+  // Smart subtitle logic
+  const [subtitle, setSubtitle] = useState("");
+
+  useEffect(() => {
+    const getGreeting = () => {
+      const hour = new Date().getHours();
+      if (hour < 6) return "夜深了，早点睡美容觉哦🌙";
+      if (hour < 9) return "早安小盈盈，记得喝水哦💧";
+      if (hour < 12) return "上午好，保持好心情✨";
+      if (hour < 14) return "午饭时间到，要吃饱饱🍱";
+      if (hour < 18) return "下午好，起来动一动吧🧘‍♀️";
+      if (hour < 20) return "傍晚啦，注意休息👀";
+      if (hour < 23) return "晚上好，今天过得开心吗🎈";
+      return "该睡觉啦，熬夜变熊猫眼哦🐼";
+    };
+
+    const tips = [
+      "记得多喝水，皮肤才会水嫩嫩！",
+      "坐久了要站起来伸个懒腰哦~",
+      "眼睛累了吗？看看远处吧。",
+      "今天也是元气满满的一天！",
+      "保持微笑，好运自然来~",
+      "深呼吸，放松一下肩膀。",
+      "你是最棒的，加油鸭！",
+      "注意坐姿，保护小蛮腰~",
+      "不要久坐，起来走两步。",
+      "给眼睛放个假，闭目养神一会。"
+    ];
+
+    const updateSubtitle = () => {
+      const greeting = getGreeting();
+      const tipIndex = Math.floor(Math.random() * tips.length);
+      setSubtitle(`${greeting} ${tips[tipIndex]}`);
+    };
+
+    updateSubtitle();
+    const interval = setInterval(updateSubtitle, 60000); 
+    return () => clearInterval(interval);
+  }, []);
+
   const [navOpen, setNavOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const navRef = useRef(null);
@@ -98,8 +139,8 @@ export default function Layout() {
     <div className={`app ${navOpen ? "nav-open" : ""}`}>
       <header className="app-header">
         <div className="brand">
-          <div className="brand-title">NoteMind</div>
-          <div className="brand-subtitle">{t("brand.subtitle")}</div>
+          <div className="brand-title">小盈盈专属笔记</div>
+          <div className="brand-subtitle">{subtitle}</div>
         </div>
         <nav className="nav-desktop">
           {renderNavLinks()}
