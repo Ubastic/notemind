@@ -1,5 +1,6 @@
 import json
 import logging
+import mimetypes
 import os
 import re
 import secrets
@@ -21,6 +22,9 @@ from .database import DATABASE_URL, SessionLocal, engine
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+mimetypes.add_type("application/javascript", ".js")
+mimetypes.add_type("application/javascript", ".mjs")
 
 SEMANTIC_SIMILARITY_THRESHOLD = float(os.getenv("SEMANTIC_SIMILARITY_THRESHOLD", "0.2"))
 SHORT_TITLE_MAX_LEN = int(os.getenv("SHORT_TITLE_MAX_LEN", "32"))

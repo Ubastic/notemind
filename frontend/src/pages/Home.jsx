@@ -31,7 +31,7 @@ const getMonthRange = (monthKey) => {
 };
 
 export default function Home() {
-  const { t, monthsShort, formatCategoryLabel } = useLanguage();
+  const { t, language, monthsShort, formatCategoryLabel } = useLanguage();
   const [monthTimeline, setMonthTimeline] = useState([]);
   const [loadedMonths, setLoadedMonths] = useState([]);
   const [monthNotes, setMonthNotes] = useState({});
@@ -171,6 +171,15 @@ export default function Home() {
   const overlayCategoryLabel = overlayNote
     ? formatCategoryLabel(overlayNote.ai_category || "idea")
     : "";
+  const resolveLabel = (key, fallback) => {
+    if (typeof t !== "function") return fallback || key;
+    const value = t(key);
+    if (!value || value === key) return fallback || value;
+    return value;
+  };
+  const overlayPinLabel = overlayNote?.pinned_global
+    ? resolveLabel("common.unpin", language === "zh" ? "取消置顶" : "Unpin")
+    : resolveLabel("common.pin", language === "zh" ? "置顶" : "Pin");
   const overlayCreated = overlayNote?.created_at
     ? overlayNote.created_at.slice(0, 19).replace("T", " ")
     : "";
@@ -852,6 +861,7 @@ export default function Home() {
         });
         return next;
       });
+      setOverlayNote((prev) => (prev && prev.id === data.id ? { ...prev, ...data } : prev));
     } catch (err) {
       setError(err.message || t("errors.updateFailed"));
     }
@@ -1128,14 +1138,19 @@ export default function Home() {
           const entry = next[monthKey];
           if (!entry?.items?.length) return;
           const filtered = entry.items.filter((note) => note.id !== noteId);
+          if (filtered.length === entry.items.length) return;
           next[monthKey] = {
             ...entry,
             items: filtered,
-            total: Math.max(0, (entry.total || filtered.length) - 1),
+            total: Math.max(0, (entry.total || entry.items.length) - 1),
           };
         });
         return next;
       });
+
+      if (overlayNote?.id === noteId) {
+        handleCloseOverlay();
+      }
     } catch (err) {
       setError(err.message || t("errors.deleteFailed"));
     }
@@ -1591,7 +1606,7 @@ export default function Home() {
                     type="button"
                     onClick={() => handleTogglePin(overlayNote)}
                   >
-                    {overlayNote?.pinned_global ? t("common.unpin") : t("common.pin")}
+                    {overlayPinLabel}
                   </button>
                 ) : null}
                 {typeof handleDelete === "function" ? (
@@ -1606,11 +1621,36 @@ export default function Home() {
               </div>
               <div className="note-overlay-actions">
                 <Link
-                  className="btn btn-outline"
                   to={`/note/${overlayNote.id}`}
                   onClick={handleCloseOverlay}
+                  title={t("note.openDetail")}
+                  style={{
+                    padding: "0.5rem",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    opacity: 0.6,
+                    color: "inherit",
+                    textDecoration: "none",
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                  onMouseOver={(e) => (e.currentTarget.style.opacity = "1")}
+                  onMouseOut={(e) => (e.currentTarget.style.opacity = "0.6")}
                 >
-                  {t("note.openDetail")}
+                  <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
                 </Link>
                 <button className="btn" type="button" onClick={handleCloseOverlay}>
                   {t("common.cancel")}

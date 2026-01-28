@@ -256,6 +256,71 @@ pre {
   gap: 16px;
 }
 
+.page-header > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.page-header-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.page-title {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.page-subtitle {
+  font-size: 14px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.note-detail-back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #ffffff;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition: all 0.2s ease;
+}
+
+.note-detail-back:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.08);
+}
+
+.note-detail-back .back-icon {
+  font-size: 15px;
+}
+
+.note-detail-title {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.note-detail-subtitle {
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
 .page-header-content {
   display: flex;
   flex-direction: column;
@@ -1214,6 +1279,11 @@ textarea {
   border-radius: 999px;
   border: 1px solid var(--border);
   background: #ffffff;
+  padding: 0 0 1px 0;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   font-size: 14px;
   font-weight: 600;
@@ -2764,6 +2834,10 @@ textarea {
   .view-controls {
     width: 100%;
     align-items: flex-start;
+  }
+
+  .toggle-block {
+    width: 100%;
   }
 
   .note-shelf-grid {
