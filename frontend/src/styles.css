@@ -251,22 +251,72 @@ pre {
 
 .page-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
 }
 
-.page-title {
-  font-size: 28px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+.page-header-content {
+  display: flex;
+  flex-direction: column;
 }
 
-.page-subtitle {
-  font-size: 14px;
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #ffffff;
   color: var(--muted);
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.action-btn svg {
+  color: var(--muted);
+  transition: color 0.2s ease;
+}
+
+.action-btn:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.action-btn:hover svg {
+  color: var(--ink);
+}
+
+.action-btn.active {
+  background: var(--ink);
+  color: #ffffff;
+  border-color: var(--ink);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.action-btn.active svg {
+  color: #ffffff;
+}
+
+.fade-in {
+  animation: rise 0.3s cubic-bezier(0.2, 0, 0.2, 1) forwards;
+}
+
+.capture-card,
+.search-card {
+  margin-bottom: 0;
 }
 
 .card {

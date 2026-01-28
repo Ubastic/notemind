@@ -311,8 +311,8 @@ export default function Home() {
       setRailOpen(true);
       setRailVisible(false);
     } else {
-      setCaptureOpen(true);
-      setSearchOpen(true);
+      setCaptureOpen(false);
+      setSearchOpen(false);
       setRailOpen(true);
       setRailVisible(false);
     }
@@ -1040,191 +1040,61 @@ export default function Home() {
   return (
     <div className="page">
       <div className="page-header">
-        <div>
+        <div className="page-header-content">
           <div className="page-title">{t("home.title")}</div>
           <div className="page-subtitle">{t("home.subtitle")}</div>
         </div>
-        <div className="btn-row">
-          <span className="shortcut">Ctrl + K</span>
-          <span className="shortcut">Ctrl + F</span>
+        <div className="header-actions">
+          <button
+            className={`action-btn ${captureOpen ? "active" : ""}`}
+            onClick={() => {
+              setCaptureOpen(!captureOpen);
+              if (!captureOpen) setTimeout(() => captureRef.current?.focus(), 100);
+            }}
+            title="Ctrl + K"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+            </svg>
+            <span>{t("home.quickCapture")}</span>
+          </button>
+          <button
+            className={`action-btn ${searchOpen ? "active" : ""}`}
+            onClick={() => {
+              setSearchOpen(!searchOpen);
+              if (!searchOpen) setTimeout(() => searchRef.current?.focus(), 100);
+            }}
+            title="Ctrl + F"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <path d="m21 21-4.3-4.3" />
+            </svg>
+            <span>{t("common.search")}</span>
+          </button>
         </div>
       </div>
       <div className="timeline-layout dual">
         <div className="timeline-main">
-          <div className="card quick-capture">
-            <div className={`collapsible-panel ${captureOpen ? "open" : ""}`}>
-              <button
-                className="collapsible-header"
-                type="button"
-                onClick={() => setCaptureOpen((prev) => !prev)}
-                aria-expanded={captureOpen}
-                aria-controls="home-capture-panel"
-              >
-                <span>{t("home.quickCapture")}</span>
-                <span className="collapsible-icon">{captureOpen ? "-" : "+"}</span>
-              </button>
-              <div className="collapsible-body" id="home-capture-panel">
-                <div className="section">
-                  <input
-                    type="text"
-                    placeholder={t("home.titlePlaceholder")}
-                    value={title}
-                    onChange={(event) => setTitle(event.target.value)}
-                  />
-                  <div className="category-picker">
-                    <div className="muted">{t("common.category")}</div>
-                    <div
-                      className="category-options"
-                      role="radiogroup"
-                      aria-label={t("common.category")}
-                    >
-                      {aiEnabled ? (
-                        <label
-                          className={`category-option ${
-                            selectedCategory === "" ? "active" : ""
-                          }`}
-                        >
-                          <input
-                            type="radio"
-                            name="timeline-category"
-                            value=""
-                            checked={selectedCategory === ""}
-                            onChange={() => setSelectedCategory("")}
-                          />
-                          <span>{t("home.aiDecide")}</span>
-                        </label>
-                      ) : null}
-                      {categories.map((category) => (
-                        <label
-                          key={category.key}
-                          className={`category-option ${
-                            selectedCategory === category.key ? "active" : ""
-                          }`}
-                        >
-                          <input
-                            type="radio"
-                            name="timeline-category"
-                            value={category.key}
-                            checked={selectedCategory === category.key}
-                            onChange={() => setSelectedCategory(category.key)}
-                          />
-                          <span>{category.label}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                  <textarea
-                    ref={captureRef}
-                    placeholder={t("home.capturePlaceholder")}
-                    value={content}
-                    onChange={(event) => {
-                      setContent(event.target.value);
-                      resizeTextareaToFit(event.target);
-                    }}
-                    onInput={(event) => resizeTextareaToFit(event.target)}
-                    onKeyDown={handleCaptureKeyDown}
-                    onPaste={handlePaste}
-                  />
-                  <div className="editor-toolbar">
-                    <button
-                      className="editor-btn"
-                      type="button"
-                      onClick={handleInsertNumbered}
-                      aria-label="Insert numbered list"
-                    >
-                      编号
-                    </button>
-                    <button
-                      className="editor-btn"
-                      type="button"
-                      onClick={handleInsertChecklist}
-                      aria-label="Insert checklist"
-                    >
-                      待办
-                    </button>
-                    <button
-                      className="editor-btn"
-                      type="button"
-                      onClick={() => imageInputRef.current?.click()}
-                      disabled={uploading}
-                    >
-                      {t("editor.uploadImage")}
-                    </button>
-                    <button
-                      className="editor-btn"
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={uploading}
-                    >
-                      {t("editor.uploadFile")}
-                    </button>
-                    <input
-                      ref={imageInputRef}
-                      type="file"
-                      accept="image/*"
-                      style={{ display: "none" }}
-                      onChange={(event) => {
-                        const file = event.target.files?.[0];
-                        event.target.value = "";
-                        handleUpload(file);
-                      }}
-                    />
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      style={{ display: "none" }}
-                      onChange={(event) => {
-                        const file = event.target.files?.[0];
-                        event.target.value = "";
-                        handleUpload(file);
-                      }}
-                    />
-                  </div>
-                  <div className="capture-actions">
-                    <button
-                      className="btn"
-                      type="button"
-                      onClick={handleSubmit}
-                      disabled={saving}
-                    >
-                      {saving ? t("common.saving") : t("common.saveNote")}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className={`collapsible-panel ${searchOpen ? "open" : ""}`}>
-              <button
-                className="collapsible-header"
-                type="button"
-                onClick={() => setSearchOpen((prev) => !prev)}
-                aria-expanded={searchOpen}
-                aria-controls="home-search-panel"
-              >
-                <span>{t("common.search")}</span>
-                <span className="collapsible-icon">{searchOpen ? "-" : "+"}</span>
-              </button>
-              <div className="collapsible-body" id="home-search-panel">
-                <div className="quick-actions">
-                  <div className="section">
-                    <form onSubmit={handleSearch} className="section">
-                      <input
-                        ref={searchRef}
-                        type="text"
-                        placeholder={t("home.searchPlaceholder")}
-                        value={search}
-                        onChange={(event) => setSearch(event.target.value)}
-                      />
-                      <button className="btn btn-outline" type="submit">
-                        {t("common.search")}
-                      </button>
-                    </form>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
           {error ? <div className="error">{error}</div> : null}
 
           {pinnedNotes.length ? (
@@ -1248,6 +1118,159 @@ export default function Home() {
               </div>
             </div>
           ) : null}
+
+          {captureOpen && (
+            <div className="card capture-card fade-in">
+              <div className="section">
+                <input
+                  type="text"
+                  placeholder={t("home.titlePlaceholder")}
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                />
+                <div className="category-picker">
+                  <div className="muted">{t("common.category")}</div>
+                  <div
+                    className="category-options"
+                    role="radiogroup"
+                    aria-label={t("common.category")}
+                  >
+                    {aiEnabled ? (
+                      <label
+                        className={`category-option ${
+                          selectedCategory === "" ? "active" : ""
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="timeline-category"
+                          value=""
+                          checked={selectedCategory === ""}
+                          onChange={() => setSelectedCategory("")}
+                        />
+                        <span>{t("home.aiDecide")}</span>
+                      </label>
+                    ) : null}
+                    {categories.map((category) => (
+                      <label
+                        key={category.key}
+                        className={`category-option ${
+                          selectedCategory === category.key ? "active" : ""
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="timeline-category"
+                          value={category.key}
+                          checked={selectedCategory === category.key}
+                          onChange={() => setSelectedCategory(category.key)}
+                        />
+                        <span>{category.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <textarea
+                  ref={captureRef}
+                  placeholder={t("home.capturePlaceholder")}
+                  value={content}
+                  onChange={(event) => {
+                    setContent(event.target.value);
+                    resizeTextareaToFit(event.target);
+                  }}
+                  onInput={(event) => resizeTextareaToFit(event.target)}
+                  onKeyDown={handleCaptureKeyDown}
+                  onPaste={handlePaste}
+                />
+                <div className="editor-toolbar">
+                  <button
+                    className="editor-btn"
+                    type="button"
+                    onClick={handleInsertNumbered}
+                    aria-label="Insert numbered list"
+                  >
+                    编号
+                  </button>
+                  <button
+                    className="editor-btn"
+                    type="button"
+                    onClick={handleInsertChecklist}
+                    aria-label="Insert checklist"
+                  >
+                    待办
+                  </button>
+                  <button
+                    className="editor-btn"
+                    type="button"
+                    onClick={() => imageInputRef.current?.click()}
+                    disabled={uploading}
+                  >
+                    {t("editor.uploadImage")}
+                  </button>
+                  <button
+                    className="editor-btn"
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                  >
+                    {t("editor.uploadFile")}
+                  </button>
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = "";
+                      handleUpload(file);
+                    }}
+                  />
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    style={{ display: "none" }}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = "";
+                      handleUpload(file);
+                    }}
+                  />
+                </div>
+                <div className="capture-actions">
+                  <button
+                    className="btn"
+                    type="button"
+                    onClick={handleSubmit}
+                    disabled={saving}
+                  >
+                    {saving ? t("common.saving") : t("common.saveNote")}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {searchOpen && (
+            <div className="card search-card fade-in">
+              <div className="quick-actions">
+                <div className="section">
+                  <form onSubmit={handleSearch} className="section">
+                    <input
+                      ref={searchRef}
+                      type="text"
+                      placeholder={t("home.searchPlaceholder")}
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                    />
+                    <button className="btn btn-outline" type="submit">
+                      {t("common.search")}
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          )}
 
           {loading ? (
             <div className="empty-state">{t("home.loadingNotes")}</div>
