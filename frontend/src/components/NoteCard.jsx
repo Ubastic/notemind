@@ -41,6 +41,7 @@ export default function NoteCard({
   index = 0,
   onDelete,
   previewMode,
+  onOpenOverlay,
   enableCategoryEdit = false,
   onUpdateCategory,
   onToggleComplete,
@@ -103,6 +104,10 @@ export default function NoteCard({
       "a, button, input, textarea, select, [data-note-action]"
     );
     if (ignore) return;
+    if (previewMode === "timeline" && typeof onOpenOverlay === "function") {
+      onOpenOverlay(note, event.currentTarget);
+      return;
+    }
     navigate(`/note/${note.id}`, { state: { from: fromPath } });
   };
   const handleDelete = async () => {
@@ -344,7 +349,10 @@ export default function NoteCard({
           ) : null}
         </div>
       ) : null}
-      <div className="note-card-body" data-note-action>
+      <div
+        className="note-card-body"
+        data-note-action={previewMode !== "timeline" ? true : undefined}
+      >
         <h3>{title}</h3>
         <MarkdownContent content={truncate(preview, 300)} />
       </div>
