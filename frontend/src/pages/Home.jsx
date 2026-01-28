@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { apiFetch, getNotesTimeline, listNotes, uploadAttachment, updateNote } from "../api";
+import MarkdownContent from "../components/MarkdownContent";
 import NoteCard from "../components/NoteCard";
 import { useLanguage } from "../context/LanguageContext";
 import { useSettings } from "../context/SettingsContext";
@@ -30,7 +31,7 @@ const getMonthRange = (monthKey) => {
 };
 
 export default function Home() {
-  const { t, monthsShort } = useLanguage();
+  const { t, monthsShort, formatCategoryLabel } = useLanguage();
   const [monthTimeline, setMonthTimeline] = useState([]);
   const [loadedMonths, setLoadedMonths] = useState([]);
   const [monthNotes, setMonthNotes] = useState({});
@@ -54,6 +55,9 @@ export default function Home() {
   const [railVisible, setRailVisible] = useState(false);
   const [captureOpen, setCaptureOpen] = useState(true);
   const [searchOpen, setSearchOpen] = useState(true);
+  const [overlayNote, setOverlayNote] = useState(null);
+  const [overlayOpen, setOverlayOpen] = useState(false);
+  const [overlayMetrics, setOverlayMetrics] = useState(null);
   const navigate = useNavigate();
   const captureRef = useRef(null);
   const searchRef = useRef(null);
@@ -67,6 +71,7 @@ export default function Home() {
   const scrubRafRef = useRef(null);
   const scrubYRef = useRef(0);
   const scrollTimeoutRef = useRef(null);
+  const overlayCloseTimeoutRef = useRef(null);
   const railTouchRef = useRef({
     startX: 0,
     startY: 0,
@@ -155,6 +160,29 @@ export default function Home() {
   }, [dates, grouped, monthsShort]);
   const hasPinned = pinnedNotes.length > 0;
   const hasUnpinned = dates.length > 0;
+
+  const overlayTitle = overlayNote
+    ? overlayNote.title || overlayNote.ai_summary || t("common.untitledNote")
+    : "";
+  const overlayContent = overlayNote
+    ? overlayNote.content || overlayNote.ai_summary || overlayNote.short_title || overlayNote.title || ""
+    : "";
+  const overlayTags = overlayNote?.ai_tags || [];
+  const overlayCategoryLabel = overlayNote
+    ? formatCategoryLabel(overlayNote.ai_category || "idea")
+    : "";
+  const overlayCreated = overlayNote?.created_at
+    ? overlayNote.created_at.slice(0, 19).replace("T", " ")
+    : "";
+  const overlayStyle = overlayMetrics
+    ? {
+        "--overlay-start-x": `${overlayMetrics.dx}px`,
+        "--overlay-start-y": `${overlayMetrics.dy}px`,
+        "--overlay-start-scale": `${overlayMetrics.scale}`,
+        width: `${overlayMetrics.targetWidth}px`,
+        height: `${overlayMetrics.targetHeight}px`,
+      }
+    : undefined;
 
   const activeIndex = useMemo(
     () => timelineItems.findIndex((item) => item.date === activeDate),
@@ -731,6 +759,70 @@ export default function Home() {
     }
   };
 
+  const handleCloseOverlay = useCallback(() => {
+    setOverlayOpen(false);
+    if (overlayCloseTimeoutRef.current) {
+      clearTimeout(overlayCloseTimeoutRef.current);
+    }
+    overlayCloseTimeoutRef.current = setTimeout(() => {
+      setOverlayNote(null);
+      setOverlayMetrics(null);
+    }, 260);
+  }, []);
+
+  const handleOpenOverlay = useCallback((note, originEl) => {
+    if (!note || !originEl || typeof window === "undefined") return;
+    const rect = originEl.getBoundingClientRect();
+    const viewportWidth = window.innerWidth || rect.width;
+    const viewportHeight = window.innerHeight || rect.height;
+    const targetWidth = Math.min(viewportWidth * 0.8, 1100);
+    const targetHeight = Math.min(viewportHeight * 0.8, 760);
+    const targetLeft = (viewportWidth - targetWidth) / 2;
+    const targetTop = (viewportHeight - targetHeight) / 2;
+    const scaleX = rect.width / targetWidth;
+    const scaleY = rect.height / targetHeight;
+    const scale = Math.max(0.2, Math.min(scaleX, scaleY, 1));
+
+    if (overlayCloseTimeoutRef.current) {
+      clearTimeout(overlayCloseTimeoutRef.current);
+      overlayCloseTimeoutRef.current = null;
+    }
+    setOverlayMetrics({
+      targetWidth,
+      targetHeight,
+      dx: rect.left - targetLeft,
+      dy: rect.top - targetTop,
+      scale,
+    });
+    setOverlayNote(note);
+    setOverlayOpen(false);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => setOverlayOpen(true));
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!overlayNote) return;
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        handleCloseOverlay();
+      }
+    };
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [overlayNote, handleCloseOverlay]);
+
+  useEffect(() => () => {
+    if (overlayCloseTimeoutRef.current) {
+      clearTimeout(overlayCloseTimeoutRef.current);
+    }
+  }, []);
+
   const handleTogglePin = async (note) => {
     if (!note) return;
     setError("");
@@ -1119,6 +1211,7 @@ export default function Home() {
                     note={note}
                     index={index}
                     previewMode="timeline"
+                    onOpenOverlay={handleOpenOverlay}
                     onDelete={() => handleDelete(note.id)}
                     enableCategoryEdit
                     onUpdateCategory={handleUpdateCategory}
@@ -1306,6 +1399,7 @@ export default function Home() {
                       note={note}
                       index={index}
                       previewMode="timeline"
+                      onOpenOverlay={handleOpenOverlay}
                       onDelete={() => handleDelete(note.id)}
                       enableCategoryEdit
                       onUpdateCategory={handleUpdateCategory}
@@ -1415,6 +1509,72 @@ export default function Home() {
           )}
         </aside>
       </div>
+      {overlayNote ? (
+        <div
+          className={`note-overlay ${overlayOpen ? "open" : ""}`}
+          role="dialog"
+          aria-modal="true"
+          onClick={handleCloseOverlay}
+        >
+          <div
+            className="note-overlay-card"
+            style={overlayStyle}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="note-overlay-header">
+              <div className="note-overlay-meta">
+                <span className="badge">{overlayCategoryLabel}</span>
+                {overlayNote.folder ? (
+                  <span className="badge">{overlayNote.folder}</span>
+                ) : null}
+                {overlayCreated ? (
+                  <span className="note-overlay-time">{overlayCreated}</span>
+                ) : null}
+              </div>
+              <button
+                className="note-overlay-close"
+                type="button"
+                onClick={handleCloseOverlay}
+                aria-label={t("common.cancel")}
+              >
+                x
+              </button>
+            </div>
+            <h2 className="note-overlay-title">{overlayTitle}</h2>
+            <div className="note-overlay-content">
+              <MarkdownContent content={overlayContent} />
+            </div>
+            <div className="note-overlay-footer">
+              {overlayTags.length ? (
+                <div className="tag-row note-overlay-tags">
+                  {overlayTags.map((tag) => (
+                    <Link
+                      key={tag}
+                      className="tag tag-link"
+                      to={`/tags?tag=${encodeURIComponent(tag)}`}
+                      onClick={handleCloseOverlay}
+                    >
+                      {tag}
+                    </Link>
+                  ))}
+                </div>
+              ) : null}
+              <div className="note-overlay-actions">
+                <Link
+                  className="btn btn-outline"
+                  to={`/note/${overlayNote.id}`}
+                  onClick={handleCloseOverlay}
+                >
+                  {t("note.openDetail")}
+                </Link>
+                <button className="btn" type="button" onClick={handleCloseOverlay}>
+                  {t("common.cancel")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

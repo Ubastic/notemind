@@ -1112,6 +1112,120 @@ textarea {
   word-break: break-word;
 }
 
+.note-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(12, 12, 12, 0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.24s ease;
+  z-index: 1200;
+}
+
+.note-overlay.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.note-overlay-card {
+  position: relative;
+  width: min(80vw, 1100px);
+  height: min(80vh, 760px);
+  background: #ffffff;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 22px 24px;
+  transform: translate(var(--overlay-start-x, 0px), var(--overlay-start-y, 0px))
+    scale(var(--overlay-start-scale, 0.6));
+  opacity: 0;
+  transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.2s ease;
+}
+
+.note-overlay.open .note-overlay-card {
+  transform: translate(0, 0) scale(1);
+  opacity: 1;
+}
+
+.note-overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.note-overlay-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.note-overlay-time {
+  font-size: 12px;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.note-overlay-title {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.35;
+}
+
+.note-overlay-content {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.note-overlay-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.note-overlay-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.note-overlay-tags {
+  max-height: 80px;
+  overflow-y: auto;
+}
+
+.note-overlay-close {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #ffffff;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--muted);
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.note-overlay-close:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
 .view-controls {
   display: flex;
   gap: 14px;
