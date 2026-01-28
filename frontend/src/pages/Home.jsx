@@ -1559,6 +1559,51 @@ export default function Home() {
                   ))}
                 </div>
               ) : null}
+              <div className="note-card-actions note-overlay-actions-bar">
+                {typeof handleToggleComplete === "function" ? (
+                  <button
+                    className={`note-toggle-status ${overlayNote?.completed ? "completed" : ""}`}
+                    type="button"
+                    onClick={() => handleToggleComplete(overlayNote)}
+                    title={overlayNote?.completed ? "Mark as in-progress" : "Mark as completed"}
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="16"
+                      height="16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      {overlayNote?.completed ? (
+                        <polyline points="20 6 9 17 4 12" />
+                      ) : (
+                        <circle cx="12" cy="12" r="9" />
+                      )}
+                    </svg>
+                  </button>
+                ) : null}
+                {typeof handleTogglePin === "function" ? (
+                  <button
+                    className="btn btn-ghost"
+                    type="button"
+                    onClick={() => handleTogglePin(overlayNote)}
+                  >
+                    {overlayNote?.pinned_global ? t("common.unpin") : t("common.pin")}
+                  </button>
+                ) : null}
+                {typeof handleDelete === "function" ? (
+                  <button
+                    className="btn btn-ghost"
+                    type="button"
+                    onClick={() => handleDelete(overlayNote.id)}
+                  >
+                    {t("common.delete")}
+                  </button>
+                ) : null}
+              </div>
               <div className="note-overlay-actions">
                 <Link
                   className="btn btn-outline"
