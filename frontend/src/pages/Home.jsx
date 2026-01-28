@@ -322,11 +322,23 @@ export default function Home() {
     const handler = (event) => {
       if (event.ctrlKey && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        captureRef.current?.focus();
+        setCaptureOpen((prev) => {
+          const next = !prev;
+          if (next) {
+            setTimeout(() => captureRef.current?.focus(), 100);
+          }
+          return next;
+        });
       }
       if (event.ctrlKey && event.key.toLowerCase() === "f") {
         event.preventDefault();
-        searchRef.current?.focus();
+        setSearchOpen((prev) => {
+          const next = !prev;
+          if (next) {
+            setTimeout(() => searchRef.current?.focus(), 100);
+          }
+          return next;
+        });
       }
     };
     window.addEventListener("keydown", handler);
