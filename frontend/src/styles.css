@@ -1120,11 +1120,11 @@ textarea {
   justify-content: center;
   padding: 24px;
   background: rgba(12, 12, 12, 0.45);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.24s ease;
+  transition: opacity 0.16s ease;
   z-index: 1200;
 }
 
@@ -1148,7 +1148,8 @@ textarea {
   transform: translate(var(--overlay-start-x, 0px), var(--overlay-start-y, 0px))
     scale(var(--overlay-start-scale, 0.6));
   opacity: 0;
-  transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.2s ease;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.14s ease;
+  will-change: transform, opacity;
 }
 
 .note-overlay.open .note-overlay-card {
