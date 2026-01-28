@@ -59,13 +59,21 @@ Write-Host "Virtual environment ready." -ForegroundColor Green
 
 # 2. Install Dependencies
 Write-Host "Installing dependencies using venv pip..." -ForegroundColor Yellow
-& $VENV_PIP install --upgrade pip
+
+# Ensure pip is available in venv (Python 3.7 may not include it)
+& $VENV_PYTHON -m ensurepip --default-pip
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Failed to ensure pip in venv." -ForegroundColor Red
+    exit 1
+}
+
+& $VENV_PYTHON -m pip install --upgrade pip
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Failed to upgrade pip." -ForegroundColor Red
     exit 1
 }
 
-& $VENV_PIP install -r requirements.txt
+& $VENV_PYTHON -m pip install -r requirements.txt
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Failed to install requirements." -ForegroundColor Red
     exit 1

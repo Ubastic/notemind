@@ -371,13 +371,6 @@ export default function NoteCard({
         ))}
       </div>
       <div className="note-card-actions" data-note-action>
-        <Link
-          className="muted"
-          to={`/note/${note.id}`}
-          state={{ from: fromPath }}
-        >
-          {t("note.openDetail")}
-        </Link>
         {onTogglePin ? (
           <button 
             className="btn btn-ghost" 
@@ -393,6 +386,30 @@ export default function NoteCard({
             {t("common.delete")}
           </button>
         ) : null}
+        <div style={{ flex: 1 }} />
+        <Link
+          to={`/note/${note.id}`}
+          state={{ from: fromPath }}
+          title={t("note.openDetail")}
+          style={{ 
+            padding: "0.5rem", 
+            display: "inline-flex", 
+            alignItems: "center", 
+            justifyContent: "center", 
+            opacity: 0.5,
+            color: "inherit",
+            textDecoration: "none",
+            background: "transparent",
+            border: "none",
+            cursor: "pointer"
+          }}
+          onMouseOver={(e) => e.currentTarget.style.opacity = "1"}
+          onMouseOut={(e) => e.currentTarget.style.opacity = "0.5"}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </Link>
       </div>
     </div>
   );

@@ -594,13 +594,38 @@ export default function NoteDetail() {
   return (
     <div className="page">
       <div className="page-header">
-        <div>
-          <button className="btn btn-ghost" type="button" onClick={handleBack}>
-            {t("common.back")}
+        <div className="page-header-main">
+          <button 
+            type="button" 
+            onClick={handleBack}
+            title={t("common.back")}
+            aria-label={t("common.back")}
+            style={{ 
+              padding: "8px", 
+              width: "40px", 
+              height: "40px", 
+              borderRadius: "999px", 
+              display: "inline-flex", 
+              alignItems: "center", 
+              justifyContent: "center",
+              marginBottom: "8px",
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              opacity: 0.6,
+            }}
+            onMouseOver={(e) => (e.currentTarget.style.opacity = "1")}
+            onMouseOut={(e) => (e.currentTarget.style.opacity = "0.6")}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
           </button>
-          <div className="page-title">{t("note.detailTitle")}</div>
-          <div className="page-subtitle">
-            {note.title || note.ai_summary || t("common.untitledNote")}
+          <div className="page-title note-detail-title">
+            {note.title || t("common.untitledNote")}
+          </div>
+          <div className="page-subtitle note-detail-subtitle">
+            {note.ai_summary || ""}
           </div>
         </div>
         <div className="btn-row">
