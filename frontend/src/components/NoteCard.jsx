@@ -46,6 +46,7 @@ export default function NoteCard({
   onUpdateCategory,
   onToggleComplete,
   onTogglePin,
+  pinScope = "global",
   isMobile = false,
 }) {
   const { t, language, formatCategoryLabel, formatMatchType } = useLanguage();
@@ -59,6 +60,12 @@ export default function NoteCard({
   const isCompleted = Boolean(note.completed);
   const isPinnedGlobal = Boolean(note.pinned_global);
   const isPinnedCategory = Boolean(note.pinned_category);
+  const isPinned =
+    pinScope === "category"
+      ? isPinnedCategory
+      : pinScope === "global"
+        ? isPinnedGlobal
+        : isPinnedGlobal || isPinnedCategory;
   const fromPath = `${location.pathname}${location.search}`;
   const categoryLabel =
     settings?.categoryLabels?.[note.ai_category] ||
@@ -82,7 +89,7 @@ export default function NoteCard({
     if (!value || value === key) return fallback || value;
     return value;
   };
-  const pinLabel = isPinnedGlobal || isPinnedCategory
+  const pinLabel = isPinned
     ? resolveLabel("common.unpin", language === "zh" ? "取消置顶" : "Unpin")
     : resolveLabel("common.pin", language === "zh" ? "置顶" : "Pin");
   const handleOpen = (event) => {
@@ -188,7 +195,7 @@ export default function NoteCard({
   }, [note.ai_category]);
   return (
     <div
-      className={`note-card ${isCompleted ? "note-card-completed" : ""} ${previewMode === "timeline" ? "note-card-timeline" : ""} ${isPinnedGlobal || isPinnedCategory ? "note-card-pinned" : ""}`}
+      className={`note-card ${isCompleted ? "note-card-completed" : ""} ${previewMode === "timeline" ? "note-card-timeline" : ""} ${isPinned ? "note-card-pinned" : ""}`}
       style={{ animationDelay: `${index * 40}ms` }}
       onClick={handleOpen}
     >
@@ -303,7 +310,7 @@ export default function NoteCard({
         {note.ai_sensitivity === "high" ? (
           <span className="badge">{t("common.sensitive")}</span>
         ) : null}
-        {(isPinnedGlobal || isPinnedCategory) ? (
+        {isPinned ? (
           <span className="pin-indicator" title={t("common.pinned")}>
             <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
               <path d="M16 4h1v12l-1 2-1-2V4zM9 4v12l-1 2-1-2V4h2zm7-2H8a1 1 0 0 0-1 1v1h11V3a1 1 0 0 0-1-1z"/>

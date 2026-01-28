@@ -725,6 +725,7 @@ export default function Category() {
                 onDelete={() => handleDelete(note.id)}
                 onToggleComplete={handleToggleComplete}
                 onTogglePin={handleTogglePin}
+                pinScope="category"
                 isMobile={isMobile}
               />
             ))}
