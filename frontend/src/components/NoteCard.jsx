@@ -363,7 +363,7 @@ export default function NoteCard({
           </Link>
         ))}
       </div>
-      <div className="note-card-actions">
+      <div className="note-card-actions" data-note-action>
         <Link
           className="muted"
           to={`/note/${note.id}`}
