@@ -5,6 +5,79 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import MermaidDiagram from "./MermaidDiagram";
 
+const createTextNode = (value) => ({ type: "text", value });
+const createHighlightNode = (value) => ({
+  type: "highlight",
+  data: { hName: "mark" },
+  children: [createTextNode(value)],
+});
+
+const ESCAPED_EQ = "__NM_ESCAPED_EQ__";
+
+const restoreEscaped = (value) => value.replaceAll(ESCAPED_EQ, "==");
+
+const splitHighlightText = (value) => {
+  if (!value || !value.includes("==")) return null;
+  const escapedValue = value.replace(/\\==/g, ESCAPED_EQ);
+  if (!escapedValue.includes("==")) {
+    return [createTextNode(restoreEscaped(escapedValue))];
+  }
+  const nodes = [];
+  let index = 0;
+
+  while (index < escapedValue.length) {
+    const start = escapedValue.indexOf("==", index);
+    if (start === -1) {
+      nodes.push(createTextNode(restoreEscaped(escapedValue.slice(index))));
+      break;
+    }
+    if (start > index) {
+      nodes.push(createTextNode(restoreEscaped(escapedValue.slice(index, start))));
+    }
+    const end = escapedValue.indexOf("==", start + 2);
+    if (end === -1) {
+      nodes.push(createTextNode(restoreEscaped(escapedValue.slice(start))));
+      break;
+    }
+    const inner = restoreEscaped(escapedValue.slice(start + 2, end));
+    if (!inner || inner.trim() === "" || inner.includes("\n")) {
+      nodes.push(createTextNode(restoreEscaped(escapedValue.slice(start, end + 2))));
+      index = end + 2;
+      continue;
+    }
+    nodes.push(createHighlightNode(inner));
+    index = end + 2;
+  }
+
+  return nodes;
+};
+
+const remarkHighlight = () => (tree) => {
+  const visit = (node) => {
+    if (!node || !node.children) return;
+    if (node.type === "code" || node.type === "inlineCode") return;
+    const nextChildren = [];
+
+    node.children.forEach((child) => {
+      if (child.type === "text") {
+        const nodes = splitHighlightText(child.value);
+        if (nodes) {
+          nextChildren.push(...nodes);
+        } else {
+          nextChildren.push(child);
+        }
+        return;
+      }
+      visit(child);
+      nextChildren.push(child);
+    });
+
+    node.children = nextChildren;
+  };
+
+  visit(tree);
+};
+
 const appendAttachmentAuth = (url, shareToken) => {
   if (!url || !url.includes("/api/attachments/")) return url;
   if (url.includes("share_token=")) return url;
@@ -23,7 +96,7 @@ export default function MarkdownContent({ content, onToggleTask, attachmentToken
   return (
     <ReactMarkdown
       className="note-content"
-      remarkPlugins={[remarkGfm, remarkBreaks]}
+      remarkPlugins={[remarkGfm, remarkBreaks, remarkHighlight]}
       components={{
         code({ node, inline, className, children, ...props }) {
           const match = /language-(\w+)/.exec(className || "");

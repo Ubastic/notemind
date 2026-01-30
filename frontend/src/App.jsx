@@ -14,6 +14,7 @@ import Search from "./pages/Search";
 import Settings from "./pages/Settings";
 import ShareView from "./pages/ShareView";
 import Tags from "./pages/Tags";
+import Tracker from "./pages/Tracker";
 
 function RequireAuth({ children }) {
   const { isAuthenticated, loading } = useAuth();
@@ -68,6 +69,7 @@ export default function App() {
         <Route path="category/:type" element={<Category />} />
         <Route path="tags" element={<Tags />} />
         <Route path="attachments" element={<Attachments />} />
+        <Route path="tracker" element={<Tracker />} />
         <Route path="search" element={<Search />} />
         <Route path="random" element={<Random />} />
         <Route path="settings" element={<Settings />} />

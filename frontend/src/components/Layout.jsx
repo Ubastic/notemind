@@ -22,6 +22,7 @@ export default function Layout() {
     { to: "/", label: t("nav.timeline") },
     { to: "/tags", label: t("nav.tags") },
     { to: "/attachments", label: t("nav.attachments") },
+    { to: "/tracker", label: t("nav.tracker") },
     ...categories.map((category) => ({
       to: `/category/${category.key}`,
       label: category.label,

@@ -161,3 +161,61 @@ export async function uploadAttachment(file, noteId) {
   }
   return payload;
 }
+
+export async function getTracker() {
+  return apiFetch("/tracker");
+}
+
+export async function saveTracker(payload) {
+  return apiFetch("/tracker", {
+    method: "PUT",
+    body: payload,
+  });
+}
+
+export async function exportTracker(format = "json", options = {}) {
+  const params = new URLSearchParams({ format });
+  if (options.projectId) params.set("project_id", String(options.projectId));
+  if (options.tableId) params.set("table_id", String(options.tableId));
+  const response = await fetch(`${API_BASE}/tracker/export?${params.toString()}`, {
+    method: "GET",
+    credentials: "include",
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    if (response.status === 401 && typeof window !== "undefined") {
+      window.dispatchEvent(new Event("auth:logout"));
+    }
+    throw new Error(extractErrorMessage(payload, "Export failed"));
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename=\"?([^\";]+)\"?/i);
+  const filename = match ? match[1] : `tracker.${format}`;
+  return { blob, filename };
+}
+
+export async function importTracker(file, format, options = {}) {
+  if (!file) {
+    throw new Error("Missing file");
+  }
+  const params = new URLSearchParams();
+  if (format) params.set("format", String(format));
+  if (options.projectId) params.set("project_id", String(options.projectId));
+  if (options.tableId) params.set("table_id", String(options.tableId));
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await fetch(`${API_BASE}/tracker/import?${params.toString()}`, {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401 && typeof window !== "undefined") {
+      window.dispatchEvent(new Event("auth:logout"));
+    }
+    throw new Error(extractErrorMessage(payload, "Import failed"));
+  }
+  return payload;
+}

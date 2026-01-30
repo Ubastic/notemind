@@ -24,6 +24,12 @@ class User(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    tracker_state = relationship(
+        "TrackerState",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
 
 class UserSettings(Base):
@@ -123,3 +129,14 @@ class Attachment(Base):
     note_attachments = relationship(
         "NoteAttachment", back_populates="attachment", cascade="all, delete-orphan"
     )
+
+
+class TrackerState(Base):
+    __tablename__ = "tracker_states"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
+    payload = Column(Text)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user = relationship("User", back_populates="tracker_state")
