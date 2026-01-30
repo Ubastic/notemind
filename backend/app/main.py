@@ -1,3 +1,4 @@
+import csv
 import json
 import logging
 import mimetypes
@@ -6,6 +7,7 @@ import re
 import secrets
 import shutil
 import sys
+from io import BytesIO, StringIO
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from .time_utils import ensure_beijing_tz, now_beijing
@@ -19,6 +21,12 @@ from sqlalchemy.orm import Session, defer
 
 from . import ai, crypto, models, schemas, security
 from .database import DATABASE_URL, SessionLocal, engine
+
+try:
+    from openpyxl import Workbook, load_workbook
+except Exception:
+    Workbook = None
+    load_workbook = None
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -411,6 +419,185 @@ def _load_user_settings_payload(user: models.User) -> Dict[str, Any]:
         return {}
     payload = _safe_json_loads(user.settings.payload, {})
     return payload if isinstance(payload, dict) else {}
+
+
+def _generate_tracker_id(prefix: str) -> str:
+    return f"{prefix}_{secrets.token_urlsafe(6)}"
+
+
+def _load_tracker_payload(db: Session, user: models.User) -> Dict[str, Any]:
+    state = (
+        db.query(models.TrackerState)
+        .filter(models.TrackerState.user_id == user.id)
+        .first()
+    )
+    if not state or not state.payload:
+        return {}
+    payload = _safe_json_loads(state.payload, {})
+    return payload if isinstance(payload, dict) else {}
+
+
+def _save_tracker_payload(db: Session, user: models.User, payload: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid tracker payload")
+    try:
+        payload_json = json.dumps(payload, ensure_ascii=False)
+    except TypeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid tracker payload"
+        ) from exc
+    state = (
+        db.query(models.TrackerState)
+        .filter(models.TrackerState.user_id == user.id)
+        .first()
+    )
+    if state:
+        state.payload = payload_json
+    else:
+        state = models.TrackerState(user_id=user.id, payload=payload_json)
+        db.add(state)
+    db.commit()
+    db.refresh(state)
+    return payload
+
+
+def _normalize_tracker_projects(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    projects = payload.get("projects") if isinstance(payload, dict) else None
+    if not isinstance(projects, list):
+        return []
+    return [project for project in projects if isinstance(project, dict)]
+
+
+def _select_tracker_project(
+    payload: Dict[str, Any], project_id: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    projects = _normalize_tracker_projects(payload)
+    if project_id:
+        for project in projects:
+            if str(project.get("id")) == str(project_id):
+                return project
+    active_id = payload.get("activeProjectId") if isinstance(payload, dict) else None
+    if active_id:
+        for project in projects:
+            if str(project.get("id")) == str(active_id):
+                return project
+    return projects[0] if projects else None
+
+
+def _select_tracker_table(
+    project: Optional[Dict[str, Any]], table_id: Optional[str] = None, active_table_id: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    if not project:
+        return None
+    tables = project.get("tables") if isinstance(project, dict) else None
+    if not isinstance(tables, list):
+        tables = []
+    if table_id:
+        for table in tables:
+            if str(table.get("id")) == str(table_id):
+                return table
+    if active_table_id:
+        for table in tables:
+            if str(table.get("id")) == str(active_table_id):
+                return table
+    return tables[0] if tables else None
+
+
+def _tracker_table_to_matrix(table: Dict[str, Any]) -> Tuple[List[str], List[List[Any]]]:
+    columns = table.get("columns") if isinstance(table, dict) else []
+    rows = table.get("rows") if isinstance(table, dict) else []
+    normalized_columns: List[Tuple[str, str, str]] = []
+    if isinstance(columns, list):
+        for column in columns:
+            if not isinstance(column, dict):
+                continue
+            col_id = str(column.get("id") or "")
+            label = str(column.get("label") or col_id or "Column")
+            col_type = str(column.get("type") or "text")
+            normalized_columns.append((col_id, label, col_type))
+    headers = [label for _, label, _ in normalized_columns]
+    matrix: List[List[Any]] = []
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            seq = row.get("seq") or 0
+            cells = row.get("cells") if isinstance(row.get("cells"), dict) else {}
+            values: List[Any] = []
+            for col_id, _, col_type in normalized_columns:
+                if col_type == "auto":
+                    values.append(seq)
+                else:
+                    values.append(cells.get(col_id, ""))
+            matrix.append(values)
+    return headers, matrix
+
+
+def _stringify_cell(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
+def _normalize_import_grid(
+    headers: List[Any], rows: List[List[Any]]
+) -> Tuple[List[str], List[List[str]]]:
+    clean_headers = [
+        str(item).strip() if item is not None else ""
+        for item in headers
+    ]
+    max_len = max([len(clean_headers)] + [len(row) for row in rows if isinstance(row, list)] + [0])
+    if not clean_headers:
+        clean_headers = [f"Column {idx + 1}" for idx in range(max_len or 1)]
+    clean_headers = [
+        label if label else f"Column {idx + 1}"
+        for idx, label in enumerate(clean_headers)
+    ]
+    if len(clean_headers) < max_len:
+        for idx in range(len(clean_headers), max_len):
+            clean_headers.append(f"Column {idx + 1}")
+    normalized_rows: List[List[str]] = []
+    for row in rows:
+        if not isinstance(row, list):
+            row = list(row) if row is not None else []
+        normalized = [_stringify_cell(cell) for cell in row]
+        if len(normalized) < max_len:
+            normalized.extend([""] * (max_len - len(normalized)))
+        normalized_rows.append(normalized[:max_len])
+    return clean_headers, normalized_rows
+
+
+def _build_table_from_import(
+    headers: List[str], rows: List[List[str]], table_name: str, preserve_table_id: Optional[str] = None
+) -> Dict[str, Any]:
+    columns: List[Dict[str, Any]] = [
+        {"id": _generate_tracker_id("col"), "label": "Seq", "type": "auto", "locked": True}
+    ]
+    for header in headers:
+        label = str(header).strip() or "Column"
+        columns.append(
+            {"id": _generate_tracker_id("col"), "label": label, "type": "text"}
+        )
+    table_rows: List[Dict[str, Any]] = []
+    for idx, row in enumerate(rows, start=1):
+        cells: Dict[str, Any] = {}
+        for col_index, value in enumerate(row):
+            if col_index + 1 >= len(columns):
+                continue
+            col_id = columns[col_index + 1]["id"]
+            cells[col_id] = value
+        table_rows.append(
+            {"id": _generate_tracker_id("row"), "seq": idx, "cells": cells}
+        )
+    table_id = preserve_table_id or _generate_tracker_id("table")
+    return {
+        "id": table_id,
+        "name": table_name,
+        "columns": columns,
+        "rows": table_rows,
+    }
 
 
 def _get_user_categories(user: models.User) -> List[Dict[str, str]]:
@@ -1033,6 +1220,175 @@ def update_settings(
         categories=categories or DEFAULT_CATEGORIES,
         ai_enabled=ai_enabled,
     )
+
+
+@app.get("/api/tracker")
+def get_tracker(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    payload = _load_tracker_payload(db, current_user)
+    if not payload:
+        return {"projects": [], "activeProjectId": "", "activeTableId": ""}
+    return payload
+
+
+@app.put("/api/tracker")
+def update_tracker(
+    payload: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    return _save_tracker_payload(db, current_user, payload)
+
+
+@app.get("/api/tracker/export")
+def export_tracker(
+    format: str = Query(default="json"),
+    project_id: Optional[str] = Query(default=None),
+    table_id: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    export_format = (format or "json").strip().lower()
+    if export_format not in ("json", "csv", "xlsx"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported export format")
+    payload = _load_tracker_payload(db, current_user)
+    if not payload:
+        payload = {"projects": [], "activeProjectId": "", "activeTableId": ""}
+    if export_format == "json":
+        content = json.dumps(payload, ensure_ascii=False, indent=2)
+        return Response(
+            content=content,
+            media_type="application/json",
+            headers={"Content-Disposition": 'attachment; filename="tracker.json"'},
+        )
+
+    project = _select_tracker_project(payload, project_id)
+    table = _select_tracker_table(project, table_id, payload.get("activeTableId"))
+    if not table:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No tracker table found")
+    headers, matrix = _tracker_table_to_matrix(table)
+    safe_name = _sanitize_filename(table.get("name") or "tracker") or "tracker"
+
+    if export_format == "csv":
+        output = StringIO()
+        writer = csv.writer(output)
+        writer.writerow(headers)
+        for row in matrix:
+            writer.writerow([_stringify_cell(cell) for cell in row])
+        data = output.getvalue().encode("utf-8-sig")
+        return Response(
+            content=data,
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{safe_name}.csv"'},
+        )
+
+    if Workbook is None:
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="XLSX export unavailable")
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Tracker"
+    sheet.append(headers)
+    for row in matrix:
+        sheet.append([cell if cell != "" else None for cell in row])
+    buffer = BytesIO()
+    workbook.save(buffer)
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.xlsx"'},
+    )
+
+
+@app.post("/api/tracker/import")
+def import_tracker(
+    file: UploadFile = File(...),
+    format: Optional[str] = Query(default=None),
+    project_id: Optional[str] = Query(default=None),
+    table_id: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    if not file or not file.filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing file")
+    ext = os.path.splitext(file.filename)[1].lower().lstrip(".")
+    import_format = (format or ext).strip().lower()
+    if import_format not in ("json", "csv", "xlsx"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported import format")
+    try:
+        if import_format == "json":
+            raw = file.file.read().decode("utf-8-sig")
+            payload = json.loads(raw or "{}")
+            if not isinstance(payload, dict) or "projects" not in payload:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid tracker JSON")
+            return _save_tracker_payload(db, current_user, payload)
+
+        if import_format == "csv":
+            raw = file.file.read().decode("utf-8-sig")
+            reader = csv.reader(StringIO(raw))
+            rows = list(reader)
+            if not rows:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty CSV file")
+            headers = rows[0]
+            body_rows = [list(row) for row in rows[1:]]
+        else:
+            if load_workbook is None:
+                raise HTTPException(
+                    status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                    detail="XLSX import unavailable",
+                )
+            data = file.file.read()
+            workbook = load_workbook(BytesIO(data), data_only=True)
+            sheet = workbook.active
+            all_rows = [list(row) for row in sheet.iter_rows(values_only=True)]
+            if not all_rows:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty XLSX file")
+            headers = all_rows[0] if all_rows else []
+            body_rows = all_rows[1:] if len(all_rows) > 1 else []
+
+        normalized_headers, normalized_rows = _normalize_import_grid(headers, body_rows)
+        payload = _load_tracker_payload(db, current_user) or {}
+        if not isinstance(payload, dict):
+            payload = {}
+        projects = payload.get("projects")
+        if not isinstance(projects, list):
+            projects = []
+        if not projects:
+            project = {
+                "id": _generate_tracker_id("project"),
+                "name": "Imported project",
+                "tables": [],
+            }
+            projects = [project]
+            payload["projects"] = projects
+            payload["activeProjectId"] = project["id"]
+        project = _select_tracker_project(payload, project_id) or projects[0]
+        tables = project.get("tables")
+        if not isinstance(tables, list):
+            tables = []
+        table = _select_tracker_table(project, table_id, payload.get("activeTableId"))
+        base_name = os.path.splitext(_sanitize_filename(file.filename))[0] or "Imported table"
+        new_table = _build_table_from_import(
+            normalized_headers, normalized_rows, base_name, preserve_table_id=table.get("id") if table else None
+        )
+        if table and table.get("name"):
+            new_table["name"] = table["name"]
+        if table:
+            project["tables"] = [
+                new_table if str(item.get("id")) == str(table.get("id")) else item
+                for item in tables
+            ]
+        else:
+            project["tables"] = tables + [new_table]
+        payload["activeProjectId"] = project.get("id")
+        payload["activeTableId"] = new_table.get("id")
+        return _save_tracker_payload(db, current_user, payload)
+    finally:
+        try:
+            file.file.close()
+        except Exception:
+            pass
 
 
 @app.post("/api/notes", response_model=schemas.NoteOut)

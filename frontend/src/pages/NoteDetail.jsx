@@ -536,6 +536,154 @@ export default function NoteDetail() {
     });
   };
 
+  const handleInsertHighlight = () => {
+    const target = contentRef.current;
+    if (!target || typeof target.selectionStart !== "number") return;
+    const { selectionStart, selectionEnd } = target;
+    const wrapper = "==";
+    const isEscapedAt = (value, index) => {
+      if (index <= 0) return false;
+      let count = 0;
+      for (let i = index - 1; i >= 0 && value[i] === "\\"; i -= 1) {
+        count += 1;
+      }
+      return count % 2 === 1;
+    };
+
+    if (selectionStart !== selectionEnd) {
+      const selectedText = content.slice(selectionStart, selectionEnd);
+      const hasOuterWrapper =
+        selectionStart >= 2 &&
+        selectionEnd + 2 <= content.length &&
+        content.slice(selectionStart - 2, selectionStart) === wrapper &&
+        content.slice(selectionEnd, selectionEnd + 2) === wrapper &&
+        !isEscapedAt(content, selectionStart - 2) &&
+        !isEscapedAt(content, selectionEnd);
+
+      if (hasOuterWrapper) {
+        const nextValue = `${content.slice(0, selectionStart - 2)}${selectedText}${content.slice(
+          selectionEnd + 2
+        )}`;
+        setContent(nextValue);
+        requestAnimationFrame(() => {
+          target.focus();
+          target.selectionStart = selectionStart - 2;
+          target.selectionEnd = selectionEnd - 2;
+        });
+        return;
+      }
+
+      if (selectedText.includes("\n")) {
+        const lines = selectedText.split("\n");
+        const allWrapped = lines.every(
+          (line) => !line || (line.startsWith(wrapper) && line.endsWith(wrapper) && line.length > 4)
+        );
+        const nextBlock = lines
+          .map((line) => {
+            if (!line) return line;
+            if (allWrapped) {
+              return line.slice(2, -2);
+            }
+            return `${wrapper}${line}${wrapper}`;
+          })
+          .join("\n");
+        const nextValue = `${content.slice(0, selectionStart)}${nextBlock}${content.slice(
+          selectionEnd
+        )}`;
+        setContent(nextValue);
+        requestAnimationFrame(() => {
+          target.focus();
+          target.selectionStart = selectionStart;
+          target.selectionEnd = selectionStart + nextBlock.length;
+        });
+        return;
+      }
+
+      const hasInnerWrapper =
+        selectedText.startsWith(wrapper) &&
+        selectedText.endsWith(wrapper) &&
+        selectedText.length > 4 &&
+        !isEscapedAt(selectedText, 0) &&
+        !isEscapedAt(selectedText, selectedText.length - 2);
+
+      if (hasInnerWrapper) {
+        const unwrapped = selectedText.slice(2, -2);
+        const nextValue = `${content.slice(0, selectionStart)}${unwrapped}${content.slice(
+          selectionEnd
+        )}`;
+        setContent(nextValue);
+        requestAnimationFrame(() => {
+          target.focus();
+          target.selectionStart = selectionStart;
+          target.selectionEnd = selectionStart + unwrapped.length;
+        });
+        return;
+      }
+
+      const insertText = `${wrapper}${selectedText}${wrapper}`;
+      const nextValue = `${content.slice(0, selectionStart)}${insertText}${content.slice(
+        selectionEnd
+      )}`;
+      setContent(nextValue);
+      requestAnimationFrame(() => {
+        target.focus();
+        target.selectionStart = selectionStart + wrapper.length;
+        target.selectionEnd = selectionEnd + wrapper.length;
+      });
+      return;
+    }
+
+    const lineStart = content.lastIndexOf("\n", selectionStart - 1) + 1;
+    const lineEndIndex = content.indexOf("\n", selectionStart);
+    const lineEnd = lineEndIndex === -1 ? content.length : lineEndIndex;
+    const line = content.slice(lineStart, lineEnd);
+    const cursorInLine = selectionStart - lineStart;
+    const findLeftWrapper = (fromIndex) => {
+      let idx = line.lastIndexOf(wrapper, fromIndex);
+      while (idx !== -1 && isEscapedAt(line, idx)) {
+        idx = line.lastIndexOf(wrapper, idx - 1);
+      }
+      return idx;
+    };
+    const findRightWrapper = (fromIndex) => {
+      let idx = line.indexOf(wrapper, fromIndex);
+      while (idx !== -1 && isEscapedAt(line, idx)) {
+        idx = line.indexOf(wrapper, idx + 1);
+      }
+      return idx;
+    };
+    const left = findLeftWrapper(cursorInLine - 1);
+    const right = findRightWrapper(cursorInLine);
+
+    if (left !== -1 && right !== -1 && left < cursorInLine && right >= cursorInLine) {
+      const beforeLine = line.slice(0, left);
+      const inner = line.slice(left + 2, right);
+      const afterLine = line.slice(right + 2);
+      const nextLine = `${beforeLine}${inner}${afterLine}`;
+      const nextValue = `${content.slice(0, lineStart)}${nextLine}${content.slice(lineEnd)}`;
+      setContent(nextValue);
+      const cursor = Math.max(selectionStart - 2, lineStart);
+      requestAnimationFrame(() => {
+        target.focus();
+        target.selectionStart = cursor;
+        target.selectionEnd = cursor;
+      });
+      return;
+    }
+
+    const insertText = `${wrapper}${wrapper}`;
+    const nextValue = `${content.slice(0, selectionStart)}${insertText}${content.slice(
+      selectionEnd
+    )}`;
+    setContent(nextValue);
+    const cursor = selectionStart + wrapper.length;
+    requestAnimationFrame(() => {
+      target.focus();
+      target.selectionStart = cursor;
+      target.selectionEnd = cursor;
+    });
+  };
+
   const handleShare = async () => {
     setError("");
     try {
@@ -701,6 +849,14 @@ export default function NoteDetail() {
                   aria-label="Insert checklist"
                 >
                   待办
+                </button>
+                <button
+                  className="editor-btn"
+                  type="button"
+                  onClick={handleInsertHighlight}
+                  aria-label="Insert highlight"
+                >
+                  {t("editor.highlight")}
                 </button>
                 <button
                   className="editor-btn"
