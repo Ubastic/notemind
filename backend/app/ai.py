@@ -631,3 +631,55 @@ def answer_question(question: str, notes: List[str], use_ai: bool = False) -> st
     if response:
         return restore_sensitive_data(response, mapping)
     return notes[0][:200]
+
+
+def generate_taxonomy_suggestion(micro_clusters: List[Dict[str, Any]], use_ai: bool = False) -> Dict[str, Any]:
+    """
+    Takes a list of micro-clusters (id, representative_titles) and asks LLM to organize them into Categories -> Folders.
+    """
+    if not _llm_allowed(use_ai):
+        return {"error": "AI not enabled"}
+
+    # Format the input for LLM
+    cluster_text = json.dumps(micro_clusters, ensure_ascii=False, indent=2)
+    
+    prompt = (
+        "You are an expert knowledge organizer. I have grouped a user's notes into small 'micro-clusters' based on similarity. "
+        "Your task is to organize these micro-clusters into a clean, logical 2-level directory structure (Category -> Folder). "
+        "Rules:\n"
+        "1. Create 5-10 top-level Categories (e.g., 'Work', 'Personal', 'Tech', 'Learning').\n"
+        "2. Inside each Category, create Folders that group related micro-clusters.\n"
+        "3. Assign EVERY micro-cluster_id to exactly one Folder.\n"
+        "4. Use bilingual names for Categories and Folders in the format 'English Name / 中文名称'. Example: 'Work / 工作', 'Project Alpha / Alpha 项目'.\n"
+        "5. Return ONLY valid JSON matching this schema:\n"
+        "{\n"
+        "  \"categories\": [\n"
+        "    {\n"
+        "      \"name\": \"Category Name / 分类名称\",\n"
+        "      \"folders\": [\n"
+        "        {\n"
+        "          \"name\": \"Folder Name / 文件夹名称\",\n"
+        "          \"cluster_ids\": [1, 5, 12]  // The IDs of micro-clusters that belong here\n"
+        "        }\n"
+        "      ]\n"
+        "    }\n"
+        "  ]\n"
+        "}\n\n"
+        f"Micro-clusters:\n{cluster_text}"
+    )
+
+    if _dashscope_ready():
+        response = dashscope.Generation.call(
+            model=LLM_CHAT_MODEL or "qwen-plus",
+            prompt=prompt,
+            result_format="message",
+        )
+        if response.status_code == 200:
+            content = response.output.choices[0].message.content
+            return _parse_qwen_json(content) or {"error": "Failed to parse LLM response"}
+
+    response_content = _openai_chat(prompt)
+    if response_content:
+        return _parse_qwen_json(response_content) or {"error": "Failed to parse LLM response"}
+        
+    return {"error": "LLM request failed"}

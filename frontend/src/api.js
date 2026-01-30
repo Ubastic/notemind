@@ -219,3 +219,17 @@ export async function importTracker(file, format, options = {}) {
   }
   return payload;
 }
+
+export async function organizeNotes(options = {}) {
+  return apiFetch("/ai/organize", {
+    method: "POST",
+    body: { dry_run: true, ...options },
+  });
+}
+
+export async function applyOrganization(categories) {
+  return apiFetch("/ai/organize/apply", {
+    method: "POST",
+    body: { categories },
+  });
+}

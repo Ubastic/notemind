@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { apiFetch } from "../api";
+import AIOrganizeModal from "../components/AIOrganizeModal";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
 import { useSettings } from "../context/SettingsContext";
@@ -27,6 +28,7 @@ export default function Settings() {
   const [categorySaving, setCategorySaving] = useState(false);
   const [categoryError, setCategoryError] = useState("");
   const [categoryNotice, setCategoryNotice] = useState("");
+  const [organizeModalOpen, setOrganizeModalOpen] = useState(false);
 
   useEffect(() => {
     setCategoryDraft(categories.map((category) => ({ ...category })));
@@ -234,6 +236,18 @@ export default function Settings() {
           {t("settings.aiToggle")}
         </label>
         {aiError ? <div className="error">{aiError}</div> : null}
+        
+        {aiEnabled && (
+          <div className="btn-row" style={{ marginTop: "16px" }}>
+            <button 
+              className="btn btn-primary" 
+              onClick={() => setOrganizeModalOpen(true)}
+              disabled={!aiEnabled}
+            >
+              {t("ai.organizeButton", "Organize with AI")}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="card">
@@ -331,6 +345,11 @@ export default function Settings() {
           ) : null}
         </div>
       </div>
+      
+      <AIOrganizeModal 
+        isOpen={organizeModalOpen} 
+        onClose={() => setOrganizeModalOpen(false)} 
+      />
     </div>
   );
 }

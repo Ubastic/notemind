@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, inspect, or_, text
 from sqlalchemy.orm import Session, defer
 
-from . import ai, crypto, models, schemas, security
+from . import ai, clustering, crypto, models, schemas, security
 from .database import DATABASE_URL, SessionLocal, engine
 
 try:
@@ -2349,6 +2349,211 @@ def ai_summarize(
     contents = [crypto.decrypt_content(note.content, key) for note in notes]
     summary = ai.summarize_notes(contents, payload.days, use_ai=use_ai)
     return schemas.AISummaryResponse(summary=summary)
+
+
+@app.post("/api/ai/organize", response_model=schemas.AIOrganizeResponse)
+def ai_organize(
+    payload: schemas.AIOrganizeRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    use_ai = _is_ai_enabled_for_user(current_user)
+    if not use_ai:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="AI is disabled.",
+        )
+
+    # 1. Fetch all notes
+    notes = db.query(models.Note).filter(models.Note.user_id == current_user.id).all()
+    if not notes:
+        return schemas.AIOrganizeResponse(categories=[], uncategorized_note_ids=[])
+
+    # 2. Local Micro-Clustering (Leader-Follower)
+    clusterer = clustering.LeaderFollowerClusterer(threshold=0.65) # Slightly lower threshold for initial grouping
+    
+    uncategorized_ids = []
+    
+    for note in notes:
+        embedding = _parse_embedding(note.embedding)
+        if not embedding:
+            uncategorized_ids.append(note.id)
+            continue
+            
+        clusterer.add_note({
+            "id": note.id,
+            "embedding": embedding,
+            "title": note.title or note.short_title or "Untitled Note"
+        })
+
+    micro_clusters = clusterer.get_micro_clusters_for_llm()
+    
+    if not micro_clusters:
+        return schemas.AIOrganizeResponse(categories=[], uncategorized_note_ids=[n.id for n in notes])
+
+    # 3. LLM Taxonomy Generation (Map-Reduce step 2)
+    taxonomy_result = ai.generate_taxonomy_suggestion(micro_clusters, use_ai=use_ai)
+    
+    if "error" in taxonomy_result:
+        logger.error(f"AI Organization failed: {taxonomy_result['error']}")
+        raise HTTPException(status_code=500, detail=taxonomy_result['error'])
+
+    # 4. Map back note IDs to the structure
+    # The LLM returns cluster_ids. We need to expand these back to note_ids.
+    # taxonomy_result structure: {"categories": [{"name": "...", "folders": [{"name": "...", "cluster_ids": [...]}]}]}
+    
+    final_categories = []
+    
+    # Map cluster_id -> list of note_ids
+    cluster_id_map = {c["id"]: [m["id"] for m in c["members"]] for c in clusterer.get_clusters()}
+    
+    raw_categories = taxonomy_result.get("categories", [])
+    for cat in raw_categories:
+        folders = []
+        for folder in cat.get("folders", []):
+            cluster_ids = folder.get("cluster_ids", [])
+            # Expand cluster_ids to note_ids
+            note_ids = []
+            for cid in cluster_ids:
+                if cid in cluster_id_map:
+                    note_ids.extend(cluster_id_map[cid])
+            
+            if note_ids:
+                folders.append(schemas.FolderSuggestion(
+                    name=folder.get("name", "Untitled Folder"),
+                    note_ids=note_ids
+                ))
+        
+        if folders:
+            final_categories.append(schemas.CategorySuggestion(
+                name=cat.get("name", "Untitled Category"),
+                folders=folders
+            ))
+
+    return schemas.AIOrganizeResponse(
+        categories=final_categories,
+        uncategorized_note_ids=uncategorized_ids
+    )
+
+
+def _parse_category_name(name: str) -> Tuple[str, str]:
+    """
+    Parse "English / Chinese" into (key, label).
+    Key is derived from the English part (slugified).
+    Label is the full string.
+    """
+    clean_name = name.strip()
+    # Handle various separators: " / ", "/", " | ", "|"
+    # We prefer the first part as the English key
+    if "/" in clean_name:
+        parts = clean_name.split("/", 1)
+    elif "|" in clean_name:
+        parts = clean_name.split("|", 1)
+    else:
+        parts = [clean_name]
+
+    if len(parts) > 1:
+        english_part = parts[0].strip()
+        # Create key from English part: lowercase, alphanumeric only-ish
+        key = re.sub(r"[^a-z0-9]+", "-", english_part.lower()).strip("-")
+        # If key ended up empty (e.g. symbol only), fallback
+        if not key:
+            key = re.sub(r"[^a-z0-9]+", "-", clean_name.lower()).strip("-")
+    else:
+        # Fallback if no separator
+        key = re.sub(r"[^a-z0-9]+", "-", clean_name.lower()).strip("-")
+    
+    if not key:
+         # Fallback for completely non-ascii string
+         key = f"cat-{secrets.token_hex(4)}"
+         
+    return key, clean_name
+
+
+@app.post("/api/ai/organize/apply", status_code=status.HTTP_204_NO_CONTENT)
+def ai_organize_apply(
+    payload: schemas.AIOrganizeApplyRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    # 1. Prepare new settings structure
+    taxonomy_state = []
+    new_category_items = []
+    
+    # We need a map of cat_index -> key to use when updating notes
+    category_key_map = {}
+
+    for idx, cat in enumerate(payload.categories):
+        key, label = _parse_category_name(cat.name)
+        # Ensure uniqueness of keys
+        original_key = key
+        counter = 1
+        while key in [x['key'] for x in new_category_items]:
+            key = f"{original_key}-{counter}"
+            counter += 1
+            
+        category_key_map[idx] = key
+        
+        # Taxonomy node (for sidebar tree)
+        cat_node = {
+            "name": label, # Use full label for display
+            "key": key,
+            "folders": [{"name": f.name} for f in cat.folders]
+        }
+        taxonomy_state.append(cat_node)
+        
+        # Settings categories list (for dropdowns/tabs)
+        new_category_items.append({"key": key, "label": label})
+
+    settings_payload = _load_user_settings_payload(current_user)
+    settings_payload["taxonomy"] = taxonomy_state
+    settings_payload["categories"] = new_category_items
+
+    _save_user_settings_payload(db, current_user, settings_payload)
+
+    # 2. Bulk Update Notes
+    updates = {}
+    
+    for idx, cat in enumerate(payload.categories):
+        cat_key = category_key_map[idx]
+        for folder in cat.folders:
+            for note_id in folder.note_ids:
+                updates[note_id] = {
+                    "ai_category": cat_key,
+                    "folder": folder.name
+                }
+    
+    if not updates:
+        return None
+
+    # Perform updates in batches
+    note_ids = list(updates.keys())
+    chunk_size = 500
+    for i in range(0, len(note_ids), chunk_size):
+        chunk_ids = note_ids[i:i + chunk_size]
+        notes = db.query(models.Note).filter(
+            models.Note.id.in_(chunk_ids),
+            models.Note.user_id == current_user.id
+        ).all()
+        
+        for note in notes:
+            if note.id in updates:
+                data = updates[note.id]
+                note.ai_category = data["ai_category"]
+                note.folder = data["folder"]
+        
+    db.commit()
+    return None
+
+
+def _save_user_settings_payload(db: Session, user: models.User, payload: Dict[str, Any]) -> None:
+    payload_json = json.dumps(payload, ensure_ascii=False)
+    if user.settings:
+        user.settings.payload = payload_json
+    else:
+        user.settings = models.UserSettings(user_id=user.id, payload=payload_json)
+        db.add(user.settings)
+    db.commit()
 
 
 # Serve static files (Frontend)

@@ -70,9 +70,56 @@
   }
   ```
 
-### 3.3 性能优化
-- 聚类计算量较大，建议在 Python 后端使用 `scikit-learn` 或 `numpy`。
-- 不要每次请求都聚类。作为异步任务 (Background Job) 运行。
+### 3.3 性能优化与低资源适配 (Low Resource Adaptation)
+由于主机配置极低 (单核/双核, <100MB RAM)，传统的 `scikit-learn` + 全量 Embedding 方案不可行。建议采用以下轻量化替代方案：
+
+#### 方案 A: LLM 直接分类 (最轻量，推荐)
+完全放弃本地聚类算法，将计算压力转移到 LLM。
+1. **流程**：
+   - 后端查询出所有待分类笔记的 `(id, title, summary)`。
+   - 组装 Prompt：`"我有一组笔记，请根据内容将它们整理成 5-10 个合理的分类。返回 JSON 格式：{category: [note_id, ...]}"`。
+   - 调用 LLM API (OpenAI/Qwen/DeepSeek)。
+   - 解析返回的 JSON，更新数据库。
+2. **优点**：本地内存占用极低（仅需处理字符串），语义理解能力最强。
+3. **缺点**：Token 消耗量大，笔记量大时需分批处理（Map-Reduce 模式）。
+
+#### 方案 B: Embedding API + 贪心聚类 (Leader-Follower Algorithm)
+利用 Embedding API 获取向量，但在本地使用极简算法，不依赖 scikit-learn。
+1. **向量获取**：调用 OpenAI/DashScope Embedding API，不要在本地跑 Embedding 模型。
+2. **流式聚类算法 (纯 Python 实现)**：
+   - 维护一个 `Clusters` 列表，每个 Cluster 记录一个中心向量 `Centroid`。
+   - 遍历每篇笔记：
+     - 计算它与现有所有 `Centroid` 的余弦相似度。
+     - 如果最大相似度 > 阈值 (如 0.8)，归入该 Cluster，并更新 Cluster 中心（加权平均）。
+     - 否则，创建一个新 Cluster。
+3. **资源消耗**：
+   - 不需要加载 huge matrix。
+   - 内存仅需存储 `K` 个中心向量和当前处理的 1 个向量。
+   - 可以在 100MB 内存内轻松处理数千篇笔记。
+
+### 3.4 大规模数据适配 (Scalability for Large Datasets)
+如果笔记数量巨大 (e.g. > 1000 篇)，方案 A (全量 LLM) 会遇到 Context Window 限制和高昂成本。
+建议采用 **"分层混合策略" (Map-Reduce 思想)**：
+1.  **第一步：本地粗聚类 (Map)**
+    - 使用 **方案 B (Leader-Follower)** 在本地快速将 1000 篇笔记聚成 50-100 个“微簇 (Micro-Clusters)”。
+    - 这一步不求精准，只求把明显相似的放在一起。
+    - 提取每个微簇的 3 个代表性标题。
+
+2.  **第二步：LLM 构建架构 (Reduce)**
+    - 只将这 50-100 个微簇的**代表标题** (数据量缩小 90%) 发送给 LLM。
+    - Prompt: `"这里有 50 组话题，请将它们归纳合并为 8-10 个顶级分类树。"`
+    - LLM 返回分类结构 (Category -> Folders)。
+
+3.  **第三步：本地归位**
+    - 根据 LLM 返回的结构，将微簇内的所有笔记批量移动到对应的目标分类中。
+
+4.  **增量更新机制**
+    - 新笔记创建时，先在本地计算它与现有分类中心的相似度。
+    - 如果 > 阈值，直接归入。
+    - 如果 < 阈值，放入 "Inbox/待整理"。
+    - 当 "Inbox" 积攒到 20 篇时，仅对这 20 篇触发一次小型 LLM 整理。
+
+### 3.5 任务调度
 
 ## 4. 潜在挑战与对策
 1. **不稳定性**：用户今天看到是分类 A，明天 AI 把它改成了分类 B，会造成困扰。
