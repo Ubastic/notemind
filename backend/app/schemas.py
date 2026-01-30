@@ -184,3 +184,26 @@ class AISummaryRequest(BaseModel):
 
 class AISummaryResponse(BaseModel):
     summary: str
+
+
+class FolderSuggestion(BaseModel):
+    name: str
+    note_ids: List[int] = Field(default_factory=list)
+
+
+class CategorySuggestion(BaseModel):
+    name: str
+    folders: List[FolderSuggestion] = Field(default_factory=list)
+
+
+class AIOrganizeRequest(BaseModel):
+    dry_run: bool = True
+
+
+class AIOrganizeResponse(BaseModel):
+    categories: List[CategorySuggestion] = Field(default_factory=list)
+    uncategorized_note_ids: List[int] = Field(default_factory=list)
+
+
+class AIOrganizeApplyRequest(BaseModel):
+    categories: List[CategorySuggestion]
