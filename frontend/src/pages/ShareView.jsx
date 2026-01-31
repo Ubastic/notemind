@@ -45,7 +45,7 @@ export default function ShareView() {
         ) : note ? (
           <div className="section">
             <div className="badge">
-              {formatCategoryLabel(note.ai_category || "idea")}
+              {formatCategoryLabel(note.ai_category || "idea", note.category_label || note.categoryLabel)}
             </div>
             <MarkdownContent content={note.content} attachmentToken={token} />
             <div className="tag-row">

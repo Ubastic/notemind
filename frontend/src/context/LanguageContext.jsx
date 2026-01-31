@@ -775,14 +775,37 @@ export function LanguageProvider({ children }) {
 
   const formatSensitivity = useCallback(
     (value) => {
-      const normalized = String(value || "low").toLowerCase();
-      const label = t(`sensitivity.${normalized}`);
-      if (label.startsWith("sensitivity.")) {
+      if (!value) return t("sensitivity.low");
+      if (value.startsWith("sensitivity.")) {
         return value || t("sensitivity.low");
       }
-      return label;
+      return value;
     },
     [t]
+  );
+
+  const parseBilingualLabel = useCallback((label) => {
+    if (!label) return { first: "", second: "" };
+    const raw = String(label).trim();
+    const separators = [" / ", "/", " | ", "|"]; // prefer spaced slash, then fallbacks
+    for (const sep of separators) {
+      if (raw.includes(sep)) {
+        const [first, second] = raw.split(sep, 2).map((part) => part.trim());
+        return { first, second };
+      }
+    }
+    return { first: raw, second: "" };
+  }, []);
+
+  const localizeLabel = useCallback(
+    (label, targetLanguage = language) => {
+      const { first, second } = parseBilingualLabel(label);
+      if (targetLanguage === "zh") {
+        return second || first || label || "";
+      }
+      return first || second || label || "";
+    },
+    [language, parseBilingualLabel]
   );
 
   const categoryLabelMap = useMemo(() => {
@@ -796,11 +819,12 @@ export function LanguageProvider({ children }) {
   }, [locale, fallback]);
 
   const formatCategoryLabel = useCallback(
-    (key) => {
-      if (!key) return t("common.unknown");
-      return categoryLabelMap[String(key)] || key;
+    (key, labelOverride) => {
+      if (!key && !labelOverride) return t("common.unknown");
+      const raw = labelOverride || categoryLabelMap[String(key)] || key;
+      return localizeLabel(raw);
     },
-    [categoryLabelMap, t]
+    [categoryLabelMap, localizeLabel, t]
   );
 
   useEffect(() => {
@@ -824,6 +848,7 @@ export function LanguageProvider({ children }) {
       formatCategoryLabel,
       formatMatchType,
       formatSensitivity,
+      localizeLabel,
     }),
     [
       language,
@@ -835,6 +860,7 @@ export function LanguageProvider({ children }) {
       formatCategoryLabel,
       formatMatchType,
       formatSensitivity,
+      localizeLabel,
     ]
   );
 
