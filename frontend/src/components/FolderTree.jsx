@@ -32,7 +32,7 @@ const createNode = (id, key, label, parentId = "") => ({
   children: new Map(),
 });
 
-const buildFolderTree = (notes, unclassifiedLabel) => {
+const buildFolderTree = (notes, unclassifiedLabel, splitFolderPath, localizeLabel) => {
   const root = createNode("root", "root", "root");
   const nodeMap = new Map();
   nodeMap.set(root.id, root);
@@ -58,7 +58,10 @@ const buildFolderTree = (notes, unclassifiedLabel) => {
       return;
     }
 
-    const parts = folderPath.split("/").filter(p => p.trim());
+    const parts = splitFolderPath(folderPath);
+    if (!parts.length) {
+      return;
+    }
     let current = root;
     let currentPath = "";
 
@@ -90,7 +93,7 @@ const buildFolderTree = (notes, unclassifiedLabel) => {
     children.forEach(finalize);
     
     // Sort children folders alphabetically
-    children.sort((a, b) => a.label.localeCompare(b.label));
+    children.sort((a, b) => localizeLabel(a.label).localeCompare(localizeLabel(b.label)));
     node.children = children;
   };
 
@@ -110,7 +113,7 @@ const buildPath = (node, map) => {
 };
 
 export default function FolderTree({ notes = [] }) {
-  const { t } = useLanguage();
+  const { t, localizeLabel, splitFolderPath } = useLanguage();
   const location = useLocation();
   const untitledLabel = t("common.untitledNote");
   const unclassifiedLabel = t("common.unclassified"); // You might need to add this translation key
@@ -118,8 +121,8 @@ export default function FolderTree({ notes = [] }) {
   
   const safeNotes = Array.isArray(notes) ? notes : [];
   const { root, map } = useMemo(
-    () => buildFolderTree(safeNotes, unclassifiedLabel),
-    [safeNotes, unclassifiedLabel]
+    () => buildFolderTree(safeNotes, unclassifiedLabel, splitFolderPath, localizeLabel),
+    [safeNotes, unclassifiedLabel, splitFolderPath, localizeLabel]
   );
   
   const [activeId, setActiveId] = useState("root");
@@ -183,6 +186,7 @@ export default function FolderTree({ notes = [] }) {
     // Calculate deep count if needed, or just show direct notes
     const directPreview = node.notes.slice(0, 4);
     const extraCount = Math.max(0, node.notes.length - directPreview.length);
+    const displayLabel = localizeLabel(node.label);
     
     return (
       <div key={node.id} className="folder-node">
@@ -192,7 +196,7 @@ export default function FolderTree({ notes = [] }) {
           onClick={() => setActiveId(node.id)}
         >
           <div className="folder-title">
-            <span className="folder-icon">📁</span> {node.label}
+            <span className="folder-icon">📁</span> {displayLabel}
           </div>
           <div className="folder-meta">
             <span className="folder-count">
@@ -245,7 +249,9 @@ export default function FolderTree({ notes = [] }) {
   const hasChildren = activeNode.children.length > 0;
   const hasNotes = activeNode.notes.length > 0;
 
-  const activeLabel = path.length ? path[path.length - 1].label : t("category.viewFolders");
+  const activeLabel = path.length
+    ? localizeLabel(path[path.length - 1].label)
+    : t("category.viewFolders");
 
   return (
     <div className="folder-view">

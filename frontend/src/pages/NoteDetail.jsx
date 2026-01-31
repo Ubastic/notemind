@@ -11,7 +11,7 @@ export default function NoteDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const { t, formatCategoryLabel, formatSensitivity } = useLanguage();
+  const { t, formatCategoryLabel, formatSensitivity, localizeFolderPath } = useLanguage();
   const settings = useSettings();
   const showCompleted = settings?.showCompleted ?? false;
   const [note, setNote] = useState(null);
@@ -362,6 +362,12 @@ export default function NoteDetail() {
   const handleContentKeyDown = (event) => {
     if (handleNumberedListEnter(event, content, setContent)) {
       return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      if (!saving) {
+        handleUpdate();
+      }
     }
   };
 
@@ -720,6 +726,11 @@ export default function NoteDetail() {
     );
   }, [note, settings, formatCategoryLabel]);
 
+  const folderLabel = useMemo(() => {
+    if (!note?.folder) return "";
+    return localizeFolderPath(note.folder);
+  }, [note, localizeFolderPath]);
+
   const relatedModeLabel = useMemo(() => {
     if (!relatedMode) return "";
     if (relatedMode === "semantic") {
@@ -924,7 +935,7 @@ export default function NoteDetail() {
               <select value={category} onChange={(e) => setCategory(e.target.value)}>
                 {(settings?.categories || []).map((cat) => (
                   <option key={cat.key} value={cat.key}>
-                    {cat.label}
+                    {formatCategoryLabel(cat.key, cat.label)}
                   </option>
                 ))}
               </select>
@@ -942,7 +953,7 @@ export default function NoteDetail() {
               />
             ) : (
               <div className={note.folder ? "" : "muted"}>
-                {note.folder || t("common.notSet")}
+                {folderLabel || t("common.notSet")}
               </div>
             )}
           </div>

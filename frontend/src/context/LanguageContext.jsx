@@ -720,6 +720,42 @@ const interpolate = (template, params) => {
   });
 };
 
+const CJK_PATTERN = /[\u4e00-\u9fff]/;
+const LATIN_PATTERN = /[A-Za-z]/;
+
+const hasCjk = (value) => CJK_PATTERN.test(String(value || ""));
+const hasLatin = (value) => LATIN_PATTERN.test(String(value || ""));
+
+const getScriptProfile = (value) => {
+  const latin = hasLatin(value);
+  const cjk = hasCjk(value);
+  if (latin && cjk) return "mixed";
+  if (latin) return "latin";
+  if (cjk) return "cjk";
+  return "other";
+};
+
+const isLikelyBilingualPair = (first, second) => {
+  if (!first || !second) return false;
+  const left = String(first);
+  const right = String(second);
+  const leftCjk = hasCjk(left);
+  const rightCjk = hasCjk(right);
+  const leftLatin = hasLatin(left);
+  const rightLatin = hasLatin(right);
+  return (leftLatin && rightCjk) || (leftCjk && rightLatin);
+};
+
+const shouldMergeBilingualParts = (first, second) => {
+  if (!first || !second) return false;
+  const leftProfile = getScriptProfile(first);
+  const rightProfile = getScriptProfile(second);
+  return (
+    (leftProfile === "latin" && rightProfile === "cjk") ||
+    (leftProfile === "cjk" && rightProfile === "latin")
+  );
+};
+
 const getInitialLanguage = () => {
   if (typeof window === "undefined") return DEFAULT_LANGUAGE;
   const stored = window.localStorage.getItem(STORAGE_KEY);
@@ -787,12 +823,15 @@ export function LanguageProvider({ children }) {
   const parseBilingualLabel = useCallback((label) => {
     if (!label) return { first: "", second: "" };
     const raw = String(label).trim();
-    const separators = [" / ", "/", " | ", "|"]; // prefer spaced slash, then fallbacks
+    const separators = [" | ", "|", " / ", "/"];
     for (const sep of separators) {
-      if (raw.includes(sep)) {
-        const [first, second] = raw.split(sep, 2).map((part) => part.trim());
-        return { first, second };
+      if (!raw.includes(sep)) continue;
+      const [first, second] = raw.split(sep, 2).map((part) => part.trim());
+      if (!second) continue;
+      if (!isLikelyBilingualPair(first, second)) {
+        continue;
       }
+      return { first, second };
     }
     return { first: raw, second: "" };
   }, []);
@@ -801,11 +840,71 @@ export function LanguageProvider({ children }) {
     (label, targetLanguage = language) => {
       const { first, second } = parseBilingualLabel(label);
       if (targetLanguage === "zh") {
+        if (hasCjk(second)) return second || first || label || "";
+        if (hasCjk(first)) return first || second || label || "";
         return second || first || label || "";
       }
+      if (hasLatin(first)) return first || second || label || "";
+      if (hasLatin(second)) return second || first || label || "";
       return first || second || label || "";
     },
     [language, parseBilingualLabel]
+  );
+
+  const splitFolderPath = useCallback((value) => {
+    if (!value) return [];
+    const raw = String(value).trim();
+    if (!raw) return [];
+    const parts = [];
+    let buffer = "";
+    for (let i = 0; i < raw.length; i += 1) {
+      const ch = raw[i];
+      if (ch === "/") {
+        const prev = raw[i - 1];
+        const next = raw[i + 1];
+        const spacedSeparator = prev === " " && next === " ";
+        if (spacedSeparator) {
+          buffer += ch;
+          continue;
+        }
+        const trimmed = buffer.trim();
+        if (trimmed) {
+          parts.push(trimmed);
+        }
+        buffer = "";
+        continue;
+      }
+      buffer += ch;
+    }
+    const tail = buffer.trim();
+    if (tail) {
+      parts.push(tail);
+    }
+    if (parts.length < 2) return parts;
+    const merged = [];
+    for (let i = 0; i < parts.length; i += 1) {
+      const current = parts[i];
+      const next = parts[i + 1];
+      if (next && shouldMergeBilingualParts(current, next)) {
+        merged.push(`${current} / ${next}`);
+        i += 1;
+        continue;
+      }
+      merged.push(current);
+    }
+    return merged;
+  }, []);
+
+  const localizeFolderPath = useCallback(
+    (value, targetLanguage = language) => {
+      const segments = splitFolderPath(value);
+      if (!segments.length) return "";
+      return segments
+        .map((segment) => localizeLabel(segment, targetLanguage))
+        .filter(Boolean)
+        .join("/");
+    },
+    [language, localizeLabel, splitFolderPath]
   );
 
   const categoryLabelMap = useMemo(() => {
@@ -849,6 +948,8 @@ export function LanguageProvider({ children }) {
       formatMatchType,
       formatSensitivity,
       localizeLabel,
+      splitFolderPath,
+      localizeFolderPath,
     }),
     [
       language,
@@ -861,6 +962,8 @@ export function LanguageProvider({ children }) {
       formatMatchType,
       formatSensitivity,
       localizeLabel,
+      splitFolderPath,
+      localizeFolderPath,
     ]
   );
 

@@ -8,7 +8,7 @@ import { useSettings } from "../context/SettingsContext";
 
 export default function Layout() {
   const { user, logout } = useAuth();
-  const { t } = useLanguage();
+  const { t, formatCategoryLabel } = useLanguage();
 
   // Smart subtitle logic
   const [subtitle, setSubtitle] = useState("");
@@ -46,10 +46,9 @@ export default function Layout() {
     };
 
     updateSubtitle();
-    const interval = setInterval(updateSubtitle, 60000); 
+    const interval = setInterval(updateSubtitle, 60000);
     return () => clearInterval(interval);
   }, []);
-
   const [navOpen, setNavOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const navRef = useRef(null);
@@ -66,7 +65,7 @@ export default function Layout() {
     { to: "/tracker", label: t("nav.tracker") },
     ...categories.map((category) => ({
       to: `/category/${category.key}`,
-      label: category.label,
+      label: formatCategoryLabel(category.key, category.label),
     })),
     { to: "/random", label: t("nav.random") },
     { to: "/settings", label: t("nav.settings") },
