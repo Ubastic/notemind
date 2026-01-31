@@ -12,7 +12,7 @@ export default function Category() {
   const { type } = useParams();
   const { t, formatCategoryLabel } = useLanguage();
   const settings = useSettings();
-  const categoryLabel = settings?.categoryLabels?.[type] || formatCategoryLabel(type);
+  const categoryLabel = formatCategoryLabel(type, settings?.categoryLabels?.[type]);
   const showCompleted = settings?.showCompleted ?? false;
   const [notes, setNotes] = useState([]);
   const [total, setTotal] = useState(0);

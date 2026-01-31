@@ -714,9 +714,9 @@ export default function NoteDetail() {
 
   const categoryLabel = useMemo(() => {
     if (!note) return "";
-    return (
-      settings?.categoryLabels?.[note.ai_category] ||
-      formatCategoryLabel(note.ai_category || "idea")
+    return formatCategoryLabel(
+      note.ai_category || "idea",
+      settings?.categoryLabels?.[note.ai_category]
     );
   }, [note, settings, formatCategoryLabel]);
 

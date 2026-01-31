@@ -23,6 +23,7 @@ env/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.python38/
 
 # Env files (keep examples)
 .env

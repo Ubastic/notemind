@@ -169,7 +169,7 @@ export default function Home() {
     : "";
   const overlayTags = overlayNote?.ai_tags || [];
   const overlayCategoryLabel = overlayNote
-    ? formatCategoryLabel(overlayNote.ai_category || "idea")
+    ? formatCategoryLabel(overlayNote.ai_category || "idea", settings?.categoryLabels?.[overlayNote.ai_category])
     : "";
   const resolveLabel = (key, fallback) => {
     if (typeof t !== "function") return fallback || key;

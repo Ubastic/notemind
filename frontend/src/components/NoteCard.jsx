@@ -67,9 +67,10 @@ export default function NoteCard({
         ? isPinnedGlobal
         : isPinnedGlobal || isPinnedCategory;
   const fromPath = `${location.pathname}${location.search}`;
-  const categoryLabel =
-    settings?.categoryLabels?.[note.ai_category] ||
-    formatCategoryLabel(note.ai_category || "idea");
+  const categoryLabel = formatCategoryLabel(
+    note.ai_category || "idea",
+    settings?.categoryLabels?.[note.ai_category]
+  );
   const currentCategory = note.ai_category || "";
   const canEditCategory =
     enableCategoryEdit && typeof onUpdateCategory === "function" && categories.length > 0;
