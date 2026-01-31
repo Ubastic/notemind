@@ -8,7 +8,7 @@ import { useSettings } from "../context/SettingsContext";
 
 export default function Layout() {
   const { user, logout } = useAuth();
-  const { t } = useLanguage();
+  const { t, formatCategoryLabel } = useLanguage();
   const [navOpen, setNavOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const navRef = useRef(null);
@@ -25,7 +25,7 @@ export default function Layout() {
     { to: "/tracker", label: t("nav.tracker") },
     ...categories.map((category) => ({
       to: `/category/${category.key}`,
-      label: category.label,
+      label: formatCategoryLabel(category.key, category.label),
     })),
     { to: "/random", label: t("nav.random") },
     { to: "/settings", label: t("nav.settings") },

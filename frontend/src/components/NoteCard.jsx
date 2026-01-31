@@ -49,7 +49,7 @@ export default function NoteCard({
   pinScope = "global",
   isMobile = false,
 }) {
-  const { t, language, formatCategoryLabel, formatMatchType } = useLanguage();
+  const { t, language, formatCategoryLabel, formatMatchType, localizeFolderPath } = useLanguage();
   const location = useLocation();
   const navigate = useNavigate();
   const settings = useSettings();
@@ -84,6 +84,7 @@ export default function NoteCard({
     typeof searchInfo?.similarity === "number" ? searchInfo.similarity : null;
   const showSimilarity = matchType.includes("semantic") && similarity !== null;
   const matchLabel = formatMatchType(matchType);
+  const folderLabel = note.folder ? localizeFolderPath(note.folder) : "";
   const resolveLabel = (key, fallback) => {
     if (typeof t !== "function") return fallback || key;
     const value = t(key);
@@ -238,7 +239,7 @@ export default function NoteCard({
                         onClick={() => handleCategorySelect(category.key)}
                         disabled={categorySaving}
                       >
-                        <span>{category.label}</span>
+                        <span>{formatCategoryLabel(category.key, category.label)}</span>
                         {active ? (
                           <span className="category-option-indicator" aria-hidden="true" />
                         ) : null}
@@ -284,7 +285,7 @@ export default function NoteCard({
                           onClick={() => handleCategorySelect(category.key)}
                           disabled={categorySaving}
                         >
-                          <span>{category.label}</span>
+                          <span>{formatCategoryLabel(category.key, category.label)}</span>
                           {active ? (
                             <span className="category-option-indicator" aria-hidden="true" />
                           ) : null}
@@ -304,7 +305,7 @@ export default function NoteCard({
         )}
         {note.folder ? (
           <span className="badge badge-outline" title={t("common.folder")}>
-            {note.folder}
+            {folderLabel}
           </span>
         ) : null}
         <span>{formatTime(note.created_at)}</span>

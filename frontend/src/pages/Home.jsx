@@ -31,7 +31,7 @@ const getMonthRange = (monthKey) => {
 };
 
 export default function Home() {
-  const { t, language, monthsShort, formatCategoryLabel } = useLanguage();
+  const { t, language, monthsShort, formatCategoryLabel, localizeFolderPath } = useLanguage();
   const [monthTimeline, setMonthTimeline] = useState([]);
   const [loadedMonths, setLoadedMonths] = useState([]);
   const [monthNotes, setMonthNotes] = useState({});
@@ -1433,7 +1433,7 @@ export default function Home() {
                           checked={selectedCategory === category.key}
                           onChange={() => setSelectedCategory(category.key)}
                         />
-                        <span>{category.label}</span>
+                        <span>{formatCategoryLabel(category.key, category.label)}</span>
                       </label>
                     ))}
                   </div>
@@ -1696,7 +1696,7 @@ export default function Home() {
               <div className="note-overlay-meta">
                 <span className="badge">{overlayCategoryLabel}</span>
                 {overlayNote.folder ? (
-                  <span className="badge">{overlayNote.folder}</span>
+                  <span className="badge">{localizeFolderPath(overlayNote.folder)}</span>
                 ) : null}
                 {overlayCreated ? (
                   <span className="note-overlay-time">{overlayCreated}</span>
